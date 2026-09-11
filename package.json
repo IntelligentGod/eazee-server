@@ -1,0 +1,31 @@
+{
+  "name": "wave-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend server for Wave app (AI tool-calling, SSE streaming)",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:watch": "tsc -w -p tsconfig.json --preserveWatchOutput",
+    "dev": "npm run build && node scripts/dev.js",
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test dist/test/*.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.19.2",
+    "firebase-admin": "^13.8.0",
+    "jose": "^4.15.9",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.30",
+    "typescript": "~5.3.3"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}
