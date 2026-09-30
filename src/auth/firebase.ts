@@ -7,13 +7,23 @@ import {
 import { getAuth } from "firebase-admin/auth";
 import type { Request } from "express";
 import { getConfig } from "../config";
+import { PRO_CLAIM_KEY, type ProEntitlementClaim } from "../subscriptions/entitlement";
 
 export type AuthenticatedUser = {
   uid: string;
   email?: string;
   displayName?: string;
   authTime: number;
+  /** Verified Eazee Pro subscription, from the user's custom claims. */
+  proEntitlement?: ProEntitlementClaim | null;
 };
+
+function readProEntitlementClaim(value: unknown): ProEntitlementClaim | null {
+  const claim = value as Partial<ProEntitlementClaim> | undefined;
+  return claim && (claim.plan === "monthly" || claim.plan === "yearly") && typeof claim.expiresAt === "number"
+    ? { plan: claim.plan, expiresAt: claim.expiresAt, originalTransactionId: String(claim.originalTransactionId || "") }
+    : null;
+}
 
 const FIREBASE_AUTHENTICATION_ERROR_CODES = new Set([
   "auth/argument-error",
@@ -85,5 +95,6 @@ export async function verifyFirebaseRequest(
     email: typeof decoded.email === "string" ? decoded.email : undefined,
     displayName,
     authTime: decoded.auth_time,
+    proEntitlement: readProEntitlementClaim(decoded[PRO_CLAIM_KEY]),
   };
 }

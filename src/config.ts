@@ -40,6 +40,13 @@ type Config = {
   accountDeletionSigningSecret?: string;
   appCheckRequired: boolean;
   appCheckAllowedAppIds: string[];
+  appleBundleId: string;
+  /** Accept Xcode's locally signed StoreKit test transactions. Development servers only. */
+  appleAllowXcodeTransactions: boolean;
+  /** Refuse Pro-only AI endpoints to accounts without a verified subscription. */
+  subscriptionEnforcement: boolean;
+  /** Accounts that always have Pro, e.g. the developer sandbox account. */
+  subscriptionUnlimitedEmails: string[];
 };
 
 function parseAllowedOrigins(raw: string | undefined): string[] {
@@ -80,5 +87,11 @@ export function getConfig(): Config {
     accountDeletionSigningSecret: process.env.ACCOUNT_DELETION_SIGNING_SECRET?.trim(),
     appCheckRequired: process.env.APP_CHECK_REQUIRED?.trim().toLowerCase() === "true",
     appCheckAllowedAppIds: parseCommaSeparatedValues(process.env.APP_CHECK_ALLOWED_APP_IDS),
+    appleBundleId: process.env.APPLE_BUNDLE_ID?.trim() || "com.eazee.ai",
+    appleAllowXcodeTransactions: process.env.APPLE_ALLOW_XCODE_TRANSACTIONS?.trim().toLowerCase() === "true",
+    subscriptionEnforcement: process.env.SUBSCRIPTION_ENFORCEMENT?.trim().toLowerCase() === "true",
+    subscriptionUnlimitedEmails: parseCommaSeparatedValues(
+      process.env.SUBSCRIPTION_UNLIMITED_EMAILS ?? "developer_sandbox@eazee.ai"
+    ).map((email) => email.toLowerCase()),
   };
 }

@@ -1,0 +1,14 @@
+# The server runs on Linux, so LF is the only line ending in the repository and
+# in the working tree. Declaring it here makes checkouts identical on every
+# machine instead of depending on each developer's core.autocrlf setting, which
+# is what produces Git's "LF will be replaced by CRLF" warnings on Windows.
+* text=auto eol=lf
+
+# Assets Git must never convert. Apple's root certificates and signing keys are
+# byte-exact: a line-ending rewrite would break signature verification.
+*.cer binary
+*.p8 binary
+*.pem binary
+*.png binary
+*.jpg binary
+*.ico binary

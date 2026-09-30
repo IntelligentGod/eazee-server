@@ -16,6 +16,14 @@ import { createAiAuthMiddleware } from "./auth/ai";
 import { createAppCheckMiddleware } from "./auth/appCheck";
 import { isFirebaseAuthenticationError, verifyFirebaseRequest, type AuthenticatedUser } from "./auth/firebase";
 import { createDeepgramRouter } from "./deepgram";
+import { createSubscriptionsRouter } from "./subscriptions/router";
+import { createProAccessMiddleware } from "./subscriptions/proAccess";
+import { createFirestoreUsageStore, createMemoryUsageStore } from "./usage/usageStore";
+import {
+  createAiUsageLimitMiddleware,
+  createUsageRouter,
+  createVoiceUsageLimitMiddleware,
+} from "./usage/usageLimits";
 import { buildTranscriptPromptChunks, type TranscriptPromptChunk } from "./ai/transcriptPrompt";
 import { excludeVideosById } from "./ai/videoSelection";
 import {
@@ -2398,7 +2406,30 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true, status: "healthy" });
 });
 
-app.use("/deepgram", appCheckMiddleware, createDeepgramRouter({ apiKey: config.deepgramApiKey }));
+// Firestore is only touched once enforcement is on; until then nothing is metered.
+const usageLimitOptions = {
+  enabled: config.subscriptionEnforcement,
+  unlimitedEmails: config.subscriptionUnlimitedEmails,
+  store: config.subscriptionEnforcement ? createFirestoreUsageStore() : createMemoryUsageStore(),
+};
+
+app.use(
+  "/deepgram",
+  appCheckMiddleware,
+  createVoiceUsageLimitMiddleware(usageLimitOptions),
+  createDeepgramRouter({ apiKey: config.deepgramApiKey })
+);
+
+app.use("/usage", appCheckMiddleware, createUsageRouter(usageLimitOptions));
+
+app.use(
+  "/subscriptions",
+  appCheckMiddleware,
+  createSubscriptionsRouter({
+    bundleId: config.appleBundleId,
+    allowXcodeTransactions: config.appleAllowXcodeTransactions,
+  })
+);
 
 app.use("/account", appCheckMiddleware);
 
@@ -2605,7 +2636,16 @@ function normalizeDurationMinutes(value: unknown) {
   return Math.max(15, Math.min(480, Math.round(parsed / 15) * 15));
 }
 
-app.use("/ai", appCheckMiddleware, createAiAuthMiddleware({ aiAuthRequired: config.aiAuthRequired }));
+app.use(
+  "/ai",
+  appCheckMiddleware,
+  createAiAuthMiddleware({ aiAuthRequired: config.aiAuthRequired }),
+  createProAccessMiddleware({
+    enabled: config.subscriptionEnforcement,
+    unlimitedEmails: config.subscriptionUnlimitedEmails,
+  }),
+  createAiUsageLimitMiddleware(usageLimitOptions)
+);
 
 app.post("/ai/day-plan/todo-durations", async (req, res) => {
   const parse = DayPlanTodoDurationRequestSchema.safeParse(req.body);
