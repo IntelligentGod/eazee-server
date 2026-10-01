@@ -31,6 +31,7 @@ import {
   type UserRecord,
 } from "./records";
 import { getPlanLimits, type SubscriptionConfigProvider } from "../usage/limitsConfig";
+import { migrateLegacyClaims } from "../auth/roles";
 import { EMPTY_USAGE, getUsageDay, type UsageStore } from "../usage/usageStore";
 
 const RenewalSchema = z.object({
@@ -90,6 +91,7 @@ export async function loadProfileFromFirebase(uid: string): Promise<UserProfile>
     displayName: record.displayName ?? null,
     providers: record.providerData.map((provider) => provider.providerId),
     authCreatedAt: Number.isFinite(created) ? created : null,
+    role: migrateLegacyClaims(record.customClaims),
   };
 }
 

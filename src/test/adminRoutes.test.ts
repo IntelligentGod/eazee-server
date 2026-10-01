@@ -63,7 +63,7 @@ async function startApp() {
     verifyRequest: async (req) => {
       const role = req.header("x-test-role");
       if (!role) return null;
-      return { uid: role === "admin" ? "admin-uid" : "alice", email: `${role}@eazee.ai`, authTime: 0, isAdmin: role === "admin" };
+      return { uid: role === "admin" ? "admin-uid" : "alice", email: `${role}@eazee.ai`, authTime: 0, role: role === "admin" ? "admin" : "customer" };
     },
     getAuthUser: async (uid) => (uid === "ghost" ? null : { uid, providers: ["password"], disabled: false }),
   }));

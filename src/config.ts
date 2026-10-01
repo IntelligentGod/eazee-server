@@ -49,6 +49,10 @@ type Config = {
   subscriptionEnforcement: boolean;
   /** Accounts that always have Pro, e.g. the developer sandbox account. */
   subscriptionUnlimitedEmails: string[];
+  /** The super admin account, created or fixed on startup (see admin/roleService.ts). */
+  superAdminEmail?: string;
+  /** Used only to create a missing super admin account; never stored. */
+  superAdminPassword?: string;
 };
 
 function parseAllowedOrigins(raw: string | undefined): string[] {
@@ -112,5 +116,7 @@ export function getConfig(): Config {
     subscriptionUnlimitedEmails: parseCommaSeparatedValues(
       process.env.SUBSCRIPTION_UNLIMITED_EMAILS ?? "developer_sandbox@eazee.ai"
     ).map((email) => email.toLowerCase()),
+    superAdminEmail: process.env.SUPER_ADMIN_EMAIL?.trim().toLowerCase() || undefined,
+    superAdminPassword: process.env.SUPER_ADMIN_PASSWORD || undefined,
   };
 }

@@ -26,25 +26,42 @@ Every endpoint requires a Firebase ID token and goes through App Check (when
 | `GET /subscriptions/status` | Plan, state, limits, today's usage, product display settings |
 | `GET /subscriptions/history` | This account's transactions (`?cursor=` for more) |
 | `POST /subscriptions/apple/notifications` | App Store Server Notifications V2. No Firebase token: Apple's signed payload is verified instead |
-| `GET /admin/me` | 200 for admins (custom claim `admin: true`) |
-| `GET /admin/users?search=&cursor=` | Users, searched by email prefix or uid |
+| `GET /admin/me` | The caller's role, for admins and super admins (custom claim `role`) |
+| `GET /admin/users?search=&role=&cursor=` | Users, searched by email prefix or uid, filtered by role |
+| `POST /admin/users/:uid/role` | Super admin only: `{ "role": "customer" | "admin" }` |
+| `GET /admin/role-changes?cursor=` | Super admin only: the role-change audit log |
 | `GET /admin/users/:uid` | Auth record, subscription, transactions, recent usage |
 | `GET /admin/purchases?productId=&status=&environment=&from=&to=&cursor=` | All transactions |
 | `GET /admin/income?granularity=day\|month&environment=&from=&to=` | Estimated revenue, subscriber counts, MRR |
 | `GET /admin/config`, `PUT /admin/config/limits`, `PUT /admin/config/products` | Limits and product display settings |
 
-### Making someone an admin
+### Roles
 
-```sh
-npm run set-admin -- --email someone@eazee.ai
-npm run set-admin -- --email someone@eazee.ai --remove
-```
+There are three roles, stored as the Firebase custom claim `role` and mirrored
+to `users/{uid}.role`:
 
-This uses the same Firebase credentials as the server. The app picks up the
-role the next time it opens (it refreshes the ID token).
+| Role | Can |
+|---|---|
+| `superAdmin` | Everything an admin can, plus change other users' roles in the admin panel |
+| `admin` | Use the admin panel |
+| `customer` | Use the app (everyone who signs up) |
 
-Existing accounts appear in the admin Users list once they open the app, or
-right away after:
+**Super admin.** On every start the server makes sure the account in
+`SUPER_ADMIN_EMAIL` exists and has the `superAdmin` role. If the account does
+not exist, it is created with `SUPER_ADMIN_PASSWORD`. An existing account keeps
+its password; only its role is fixed. Its uid is recorded in `config/roles`.
+The password is never stored in Firestore or logged.
+
+**Admins** are made, and made customers again, by the super admin in the
+admin panel (Users > a user > Role). There is no command-line step. The super
+admin role cannot be granted or removed from the app, and nobody can change
+their own role, so there is always a super admin. Each change revokes the
+user's refresh tokens (they sign in again to get the new role) and is recorded
+in `roleChanges`.
+
+**Existing accounts.** Run this once after deploying. It lists every account in
+the admin Users list and migrates the old `admin: true` claim to
+`role: "admin"`:
 
 ```sh
 npm run backfill-users
@@ -58,6 +75,7 @@ npm run backfill-users
 | `SUBSCRIPTION_UNLIMITED_EMAILS` | `developer_sandbox@eazee.ai` | Accounts that always get Pro limits |
 | `APPLE_BUNDLE_ID` | `com.eazee.ai` | Transactions for other apps are refused |
 | `APP_ENV` | `production` | Set to `development` only on local servers |
+| `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD` | unset | The super admin account; see Roles. The password only creates a missing account |
 | `APPLE_ALLOW_XCODE_TRANSACTIONS` | off | Accept Xcode's locally signed StoreKit transactions. **The server refuses to start with this on unless `APP_ENV=development`** |
 
 The limits themselves are not environment variables. They are stored in

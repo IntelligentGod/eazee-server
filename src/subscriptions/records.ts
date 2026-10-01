@@ -2,6 +2,7 @@ import { FieldPath, FieldValue, getFirestore, type DocumentSnapshot, type Query 
 import { getFirebaseAuth } from "../auth/firebase";
 import type { AppleTransaction } from "./appleTransactions";
 import { APPLE_PRODUCT_PLANS, getAppAccountTokenForUser, type ProPlanId } from "./entitlement";
+import type { Role } from "../auth/roles";
 
 /**
  * Subscription records in Firestore (documented in FIRESTORE.md). Only the
@@ -11,6 +12,8 @@ import { APPLE_PRODUCT_PLANS, getAppAccountTokenForUser, type ProPlanId } from "
  *   users/{uid}/transactions/{transactionId} one per App Store transaction
  *   revenueDaily/{environment}_{YYYY-MM-DD}  totals for the income screen
  *   appleNotifications/{notificationUUID}    App Store notifications already handled
+ *   roleChanges/{id}                         audit log of role changes
+ *   config/roles                             who the super admin is
  */
 
 export type SubscriptionState = "none" | "active" | "cancelled" | "billing_retry" | "expired" | "refunded";
@@ -26,10 +29,13 @@ export type UserProfile = {
   displayName: string | null;
   providers: string[];
   authCreatedAt: number | null;
+  /** Mirrors the `role` custom claim; defaults to customer. */
+  role?: Role;
 };
 
 export type UserRecord = UserProfile & {
   uid: string;
+  role: Role;
   emailLower: string;
   appAccountToken: string;
   plan: "free" | ProPlanId;
@@ -104,6 +110,7 @@ export function newUserRecord(uid: string, profile: UserProfile, now: number): U
   return {
     ...profile,
     uid,
+    role: profile.role ?? "customer",
     emailLower: (profile.email || "").trim().toLowerCase(),
     appAccountToken: getAppAccountTokenForUser(uid),
     plan: "free",
@@ -277,6 +284,17 @@ export function applyRenewalUpdate(user: UserRecord, update: RenewalUpdate, now:
   };
 }
 
+export type RoleChange = {
+  id: string;
+  targetUid: string;
+  targetEmail: string | null;
+  from: Role;
+  to: Role;
+  changedBy: string;
+  changedByEmail: string | null;
+  at: number;
+};
+
 export type TransactionQuery = {
   from?: number;
   to?: number;
@@ -297,7 +315,13 @@ export interface SubscriptionRecordsStore {
   findUid(match: { appAccountToken?: string; originalTransactionId?: string }): Promise<string | null>;
   /** True the first time a notification id is seen. */
   claimNotification(notificationUUID: string, meta: Record<string, unknown>): Promise<boolean>;
-  listUsers(options: { search?: string; limit: number; cursor?: string }): Promise<UserRecord[]>;
+  listUsers(options: { search?: string; role?: Role; limit: number; cursor?: string }): Promise<UserRecord[]>;
+  /** Mirrors a role onto `users/{uid}`, creating the document when the user has none yet. */
+  setUserRole(uid: string, role: Role, profile: UserProfile, now: number): Promise<UserRecord>;
+  addRoleChange(change: Omit<RoleChange, "id">): Promise<RoleChange>;
+  listRoleChanges(options: { limit: number; cursor?: string }): Promise<RoleChange[]>;
+  /** `config/roles`: the super admin's uid and email. */
+  setSuperAdmin(uid: string, email: string, now: number): Promise<void>;
   listTransactions(query: TransactionQuery): Promise<TransactionRecord[]>;
   listRevenueDays(options: { environment: string; from: string; to: string }): Promise<RevenueDay[]>;
   /** Users whose subscription period has not ended. */
@@ -328,11 +352,16 @@ const matchesSearch = (user: UserRecord, search?: string) => {
 };
 
 /** For tests and local runs without Firestore. */
-export function createMemorySubscriptionRecordsStore(): SubscriptionRecordsStore & { revenue: Map<string, RevenueDay> } {
+export function createMemorySubscriptionRecordsStore(): SubscriptionRecordsStore & {
+  revenue: Map<string, RevenueDay>;
+  readonly superAdmin: { uid: string; email: string } | null;
+} {
   const users = new Map<string, UserRecord>();
   const transactions = new Map<string, TransactionRecord>();
   const revenue = new Map<string, RevenueDay>();
   const notifications = new Set<string>();
+  const roleChanges: RoleChange[] = [];
+  let superAdmin: { uid: string; email: string } | null = null;
   const txKey = (uid: string, transactionId: string) => `${uid}/${transactionId}`;
 
   const page = <T>(items: T[], key: (item: T) => string, limit: number, cursor?: string) => {
@@ -342,6 +371,9 @@ export function createMemorySubscriptionRecordsStore(): SubscriptionRecordsStore
 
   return {
     revenue,
+    get superAdmin() {
+      return superAdmin;
+    },
     async getUser(uid) {
       return users.get(uid) ?? null;
     },
@@ -397,8 +429,8 @@ export function createMemorySubscriptionRecordsStore(): SubscriptionRecordsStore
       notifications.add(notificationUUID);
       return true;
     },
-    async listUsers({ search, limit, cursor }) {
-      const items = [...users.values()].filter((user) => matchesSearch(user, search))
+    async listUsers({ search, role, limit, cursor }) {
+      const items = [...users.values()].filter((user) => matchesSearch(user, search) && (!role || user.role === role))
         .sort((a, b) => a.emailLower.localeCompare(b.emailLower) || a.uid.localeCompare(b.uid));
       return page(items, (user) => user.uid, limit, cursor);
     },
@@ -416,6 +448,22 @@ export function createMemorySubscriptionRecordsStore(): SubscriptionRecordsStore
     },
     async listSubscribedUsers(now) {
       return [...users.values()].filter((user) => (user.expiresAt ?? 0) > now);
+    },
+    async setUserRole(uid, role, profile, now) {
+      const user = { ...(users.get(uid) ?? newUserRecord(uid, profile, now)), role, updatedAt: now };
+      users.set(uid, user);
+      return user;
+    },
+    async addRoleChange(change) {
+      const entry = { ...change, id: `${change.at}-${roleChanges.length}` };
+      roleChanges.push(entry);
+      return entry;
+    },
+    async listRoleChanges({ limit, cursor }) {
+      return page([...roleChanges].sort((a, b) => b.at - a.at), (change) => change.id, limit, cursor);
+    },
+    async setSuperAdmin(uid, email) {
+      superAdmin = { uid, email };
     },
   };
 }
@@ -532,20 +580,21 @@ export function createFirestoreSubscriptionRecordsStore(): SubscriptionRecordsSt
         throw error;
       }
     },
-    async listUsers({ search, limit, cursor }) {
+    async listUsers({ search, role, limit, cursor }) {
       const term = (search || "").trim();
       const results: UserRecord[] = [];
       // A search that is exactly a uid finds that user first.
       if (term && !cursor && /^[A-Za-z0-9_-]{10,128}$/.test(term)) {
         const byUid = readUserRecord(term, (await userRef(term).get()).data());
-        if (byUid) results.push(byUid);
+        if (byUid && (!role || byUid.role === role)) results.push(byUid);
       }
-      let query: Query = usersRef.orderBy("emailLower").orderBy(FieldPath.documentId());
+      // A role filter needs the (role, emailLower) index in firestore.indexes.json.
+      let query: Query = role ? usersRef.where("role", "==", role) : usersRef;
       if (term) {
         const lower = term.toLowerCase();
-        query = usersRef.where("emailLower", ">=", lower).where("emailLower", "<", `${lower}`)
-          .orderBy("emailLower").orderBy(FieldPath.documentId());
+        query = query.where("emailLower", ">=", lower).where("emailLower", "<", `${lower}\uf8ff`);
       }
+      query = query.orderBy("emailLower").orderBy(FieldPath.documentId());
       query = await startAfterDoc(query, cursor ? userRef(cursor).path : undefined);
       const snapshot = await query.limit(limit).get();
       for (const doc of snapshot.docs) {
@@ -576,6 +625,28 @@ export function createFirestoreSubscriptionRecordsStore(): SubscriptionRecordsSt
     async listSubscribedUsers(now) {
       const snapshot = await usersRef.where("expiresAt", ">", now).get();
       return snapshot.docs.map((doc) => readUserRecord(doc.id, doc.data())!);
+    },
+    async setUserRole(uid, role, profile, now) {
+      return db.runTransaction(async (t) => {
+        const existing = readUserRecord(uid, (await t.get(userRef(uid))).data());
+        const user = { ...(existing ?? newUserRecord(uid, profile, now)), role, updatedAt: now };
+        // A document without emailLower would be missing from the Users list, so a new one is written whole.
+        if (existing) t.set(userRef(uid), { role, updatedAt: now }, { merge: true });
+        else t.set(userRef(uid), user);
+        return user;
+      });
+    },
+    async addRoleChange(change) {
+      const ref = await db.collection("roleChanges").add(change);
+      return { ...change, id: ref.id };
+    },
+    async listRoleChanges({ limit, cursor }) {
+      let query: Query = db.collection("roleChanges").orderBy("at", "desc");
+      query = await startAfterDoc(query, cursor ? db.collection("roleChanges").doc(cursor).path : undefined);
+      return (await query.limit(limit).get()).docs.map((doc) => ({ ...(doc.data() as Omit<RoleChange, "id">), id: doc.id }));
+    },
+    async setSuperAdmin(uid, email, now) {
+      await db.collection("config").doc("roles").set({ superAdminUid: uid, superAdminEmail: email, updatedAt: now }, { merge: true });
     },
   };
 }

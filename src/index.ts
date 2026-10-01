@@ -20,6 +20,7 @@ import { createAppleNotificationsHandler, createSubscriptionsRouter } from "./su
 import { createProAccessMiddleware } from "./subscriptions/proAccess";
 import { createFirestoreSubscriptionRecordsStore } from "./subscriptions/records";
 import { createAdminRouter } from "./admin/router";
+import { bootstrapSuperAdmin, createFirebaseRoleAuth } from "./admin/roleService";
 import { createFirestoreUsageStore, createMemoryUsageStore } from "./usage/usageStore";
 import { createFirestoreConfigStore, createSubscriptionConfigProvider } from "./usage/limitsConfig";
 import {
@@ -3704,7 +3705,27 @@ export function closeAppResources() {
   sseHub.close();
 }
 
+/** Creates or fixes the super admin account; a failure is logged and the server still starts. */
+async function ensureSuperAdmin() {
+  try {
+    const result = await bootstrapSuperAdmin({
+      email: config.superAdminEmail,
+      password: config.superAdminPassword,
+      auth: createFirebaseRoleAuth(),
+      records: subscriptionRecords,
+    });
+    if (result.status === "skipped") {
+      console.warn("[roles] SUPER_ADMIN_EMAIL is not set; no super admin account was checked");
+    } else {
+      console.log(`[roles] super admin ${result.email} (${result.uid}): ${result.status}`);
+    }
+  } catch (error) {
+    console.error("[roles] could not set up the super admin account:", error instanceof Error ? error.message : error);
+  }
+}
+
 export function startAppServer() {
+  void ensureSuperAdmin();
   return app.listen(config.port, "0.0.0.0", () => {
     console.log(`Eazee server listening on ${config.port}`);
   });

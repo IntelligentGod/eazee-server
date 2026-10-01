@@ -22,13 +22,15 @@ import {
   type SubscriptionConfigProvider,
 } from "../usage/limitsConfig";
 import type { UsageStore } from "../usage/usageStore";
+import { ASSIGNABLE_ROLES, ROLES, isStaffRole, migrateLegacyClaims, type Role } from "../auth/roles";
+import { RoleChangeError, changeUserRole, createFirebaseRoleAuth, type RoleAuth } from "./roleService";
 
 type AdminRequest = Request & { admin?: AuthenticatedUser };
 
 /**
- * Admin endpoints require the `admin: true` custom claim on a fresh, unrevoked
- * ID token. The claim is set only by scripts/setAdmin.ts with the Admin SDK, so
- * no client can grant it to itself.
+ * Admin endpoints require the `role` custom claim `admin` or `superAdmin` on a
+ * fresh, unrevoked ID token. Only this server sets that claim (the super admin
+ * bootstrap and POST /admin/users/:uid/role), so no client can grant it to itself.
  */
 export function createRequireAdminMiddleware(options: {
   verifyRequest?: (req: Request) => Promise<AuthenticatedUser | null>;
@@ -39,7 +41,9 @@ export function createRequireAdminMiddleware(options: {
     try {
       const user = await verifyRequest(req);
       if (!user) return res.status(401).json({ error: "Authentication required" });
-      if (user.isAdmin !== true) return res.status(403).json({ error: "Admin access required", code: "ADMIN_REQUIRED" });
+      if (!isStaffRole(user.role ?? "customer")) {
+        return res.status(403).json({ error: "Admin access required", code: "ADMIN_REQUIRED" });
+      }
       (req as AdminRequest).admin = user;
       return next();
     } catch (error) {
@@ -50,12 +54,19 @@ export function createRequireAdminMiddleware(options: {
   };
 }
 
+/** Role management: only a super admin, checked on top of the admin check. */
+const requireSuperAdmin: RequestHandler = (req, res, next) =>
+  (req as AdminRequest).admin?.role === "superAdmin"
+    ? next()
+    : res.status(403).json({ error: "Super admin access required", code: "SUPER_ADMIN_REQUIRED" });
+
 const DaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const EnvironmentSchema = z.enum(["Production", "Sandbox", "Xcode"]);
 const StatusSchema = z.enum(["active", "cancelled", "expired", "upgraded", "refunded"]);
 
 const UsersQuerySchema = z.object({
   search: z.string().trim().max(200).optional(),
+  role: z.enum(ROLES).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   cursor: z.string().min(1).max(200).optional(),
 });
@@ -73,6 +84,12 @@ const IncomeQuerySchema = z.object({
   environment: EnvironmentSchema.default("Production"),
   from: DaySchema.optional(),
   to: DaySchema.optional(),
+});
+
+const RoleBodySchema = z.object({ role: z.enum(ASSIGNABLE_ROLES) });
+const RoleChangesQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  cursor: z.string().min(1).max(200).optional(),
 });
 
 const DAY_MS = 86_400_000;
@@ -182,6 +199,7 @@ type AdminRouterOptions = {
   verifyRequest?: (req: Request) => Promise<AuthenticatedUser | null>;
   /** Firebase Auth details for the user detail page. */
   getAuthUser?: (uid: string) => Promise<Record<string, unknown> | null>;
+  roleAuth?: RoleAuth;
   now?: () => number;
 };
 
@@ -197,7 +215,7 @@ async function getAuthUserFromFirebase(uid: string) {
       providers: record.providerData.map((provider) => provider.providerId),
       createdAt: Date.parse(record.metadata.creationTime) || null,
       lastSignInAt: Date.parse(record.metadata.lastSignInTime) || null,
-      isAdmin: record.customClaims?.admin === true,
+      role: migrateLegacyClaims(record.customClaims),
     };
   } catch (error: any) {
     if (error?.code === "auth/user-not-found") return null;
@@ -209,6 +227,8 @@ export function createAdminRouter(options: AdminRouterOptions) {
   const router = express.Router();
   const now = options.now ?? Date.now;
   const getAuthUser = options.getAuthUser ?? getAuthUserFromFirebase;
+  let roleAuth = options.roleAuth;
+  const getRoleAuth = () => (roleAuth ??= createFirebaseRoleAuth());
   const isUnlimited = (email: string | null) =>
     !!email && options.unlimitedEmails.includes(email.trim().toLowerCase());
 
@@ -218,6 +238,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     uid: user.uid,
     email: user.email,
     displayName: user.displayName,
+    role: user.role,
     providers: user.providers,
     createdAt: user.authCreatedAt ?? user.createdAt,
     subscription: summarizeSubscription(user, { now: at, unlimited: isUnlimited(user.email) }),
@@ -234,7 +255,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
 
   router.get("/me", (req, res) => {
     const admin = (req as AdminRequest).admin!;
-    res.json({ uid: admin.uid, email: admin.email ?? null, isAdmin: true });
+    res.json({ uid: admin.uid, email: admin.email ?? null, role: admin.role as Role });
   });
 
   router.get("/users", handle(async (req, res) => {
@@ -265,6 +286,38 @@ export function createAdminRouter(options: AdminRouterOptions) {
       transactions: transactions.map((record) => presentTransaction(record, at)),
       usage,
     });
+  }));
+
+  router.post("/users/:uid/role", requireSuperAdmin, handle(async (req, res) => {
+    const uid = z.string().min(1).max(128).safeParse(req.params.uid);
+    const body = RoleBodySchema.safeParse(req.body);
+    if (!uid.success || !body.success) {
+      return void res.status(400).json({ error: "role must be customer or admin" });
+    }
+    const admin = (req as AdminRequest).admin!;
+    try {
+      const result = await changeUserRole({
+        actor: { uid: admin.uid, email: admin.email },
+        targetUid: uid.data,
+        role: body.data.role,
+        auth: getRoleAuth(),
+        records: options.records,
+        now: now(),
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof RoleChangeError) {
+        return void res.status(error.status).json({ error: error.message, code: error.code });
+      }
+      throw error;
+    }
+  }));
+
+  router.get("/role-changes", requireSuperAdmin, handle(async (req, res) => {
+    const query = RoleChangesQuerySchema.safeParse(req.query);
+    if (!query.success) return void res.status(400).json({ error: "Invalid query" });
+    const changes = await options.records.listRoleChanges(query.data);
+    res.json({ changes, nextCursor: changes.length === query.data.limit ? changes[changes.length - 1].id : null });
   }));
 
   router.get("/purchases", handle(async (req, res) => {

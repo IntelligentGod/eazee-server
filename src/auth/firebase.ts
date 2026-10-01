@@ -8,6 +8,7 @@ import { getAuth } from "firebase-admin/auth";
 import type { Request } from "express";
 import { getConfig } from "../config";
 import { PRO_CLAIM_KEY, type ProEntitlementClaim } from "../subscriptions/entitlement";
+import { ROLE_CLAIM_KEY, readRoleClaim, type Role } from "./roles";
 
 export type AuthenticatedUser = {
   uid: string;
@@ -16,8 +17,8 @@ export type AuthenticatedUser = {
   authTime: number;
   /** Verified Eazee Pro subscription, from the user's custom claims. */
   proEntitlement?: ProEntitlementClaim | null;
-  /** The `admin: true` custom claim, set only by scripts/setAdmin.ts. */
-  isAdmin?: boolean;
+  /** The `role` custom claim; only this server sets it (see auth/roles.ts). */
+  role?: Role;
 };
 
 function readProEntitlementClaim(value: unknown): ProEntitlementClaim | null {
@@ -98,6 +99,6 @@ export async function verifyFirebaseRequest(
     displayName,
     authTime: decoded.auth_time,
     proEntitlement: readProEntitlementClaim(decoded[PRO_CLAIM_KEY]),
-    isAdmin: decoded.admin === true,
+    role: readRoleClaim(decoded[ROLE_CLAIM_KEY]),
   };
 }

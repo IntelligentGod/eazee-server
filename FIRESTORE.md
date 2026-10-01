@@ -2,7 +2,7 @@
 
 Only this server writes these documents, using the Admin SDK. `firestore.rules`
 denies every client write. Clients may read their own documents, and admins
-(custom claim `admin: true`) may read everything. The app itself reads all of
+(custom claim `role` of `admin` or `superAdmin`) may read the admin data. The app itself reads all of
 this through the server's endpoints, not directly.
 
 All times are epoch milliseconds. Prices are kept in milliunits, as Apple
@@ -18,6 +18,7 @@ does this at launch), or by `npm run backfill-users` for existing accounts.
 | `email`, `emailLower`, `displayName` | From Firebase Auth. `emailLower` is used for the admin search (prefix match). |
 | `providers` | Sign-in providers, e.g. `apple.com`, `google.com`, `password`. |
 | `authCreatedAt` | When the Firebase account was created. |
+| `role` | `customer`, `admin` or `superAdmin`. Mirrors the custom claim `role`, which is the source of truth; only the server writes either. |
 | `appAccountToken` | The StoreKit `appAccountToken` for this account. App Store notifications are matched to users through it. |
 | `plan` | `free`, `monthly` or `yearly`: the plan of the current (or last) subscription. |
 | `currentProductId`, `currentTransactionId`, `currentPurchaseDate`, `originalTransactionId` | The newest transaction of the subscription. |
@@ -82,7 +83,7 @@ shown as "Pro only"); Pro is unlimited.
 This collection is unchanged, apart from new counters. One document per user
 per local day: `aiActions`, `voiceSeconds`, `unchargedRequests`,
 `guidanceGoal`, `guidanceTask`, `guidanceRecipeSkill` and `guidanceQuestions`.
-`expireAt` drives the TTL policy in `firestore.indexes.json` (7 days).
+Each document has an `expireAt` 7 days ahead. To have Firestore delete old days automatically, add a TTL policy on the `days` collection group's `expireAt` field (Firestore > TTL in the Google Cloud console). That needs billing (the Blaze plan), so it is not in `firestore.indexes.json`; without it the old days simply stay.
 Enforcement is still controlled by `SUBSCRIPTION_ENFORCEMENT=true`.
 
 ## `revenueDaily/{environment}_{YYYY-MM-DD}`
@@ -93,6 +94,17 @@ transaction, so the income screen never scans every purchase: `count`,
 `byProduct.{productKey}.{productId,count,grossMilli}`. Days are UTC. Monthly
 figures are sums of days. All figures are estimates: real proceeds after
 Apple's commission and taxes come from App Store Connect reports.
+
+## `roleChanges/{id}`
+
+The audit log of role changes made in the admin panel: `targetUid`,
+`targetEmail`, `from`, `to`, `changedBy`, `changedByEmail` and `at`. Only the
+super admin can read it.
+
+## `config/roles`
+
+`superAdminUid`, `superAdminEmail` and `updatedAt`, written by the startup
+bootstrap. It holds no password. Only the super admin can read it.
 
 ## `appleNotifications/{notificationUUID}`
 

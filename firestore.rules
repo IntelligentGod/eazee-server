@@ -1,16 +1,20 @@
 rules_version = '2';
 
 // Only the Eazee server writes this database, through the Admin SDK (which
-// bypasses these rules). Clients may read their own records; admins (custom
-// claim `admin: true`, set by src/scripts/setAdmin.ts) may read everything.
-// Every client write is denied, so no client can grant itself Pro or admin.
+// bypasses these rules). Clients may read their own records; staff (custom
+// claim `role` of `admin` or `superAdmin`, set only by the server) may read the
+// admin data; role changes and the role config are for the super admin only.
+// Every client write is denied, so no client can grant itself Pro or a role.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
       return request.auth != null;
     }
     function isAdmin() {
-      return signedIn() && request.auth.token.admin == true;
+      return signedIn() && request.auth.token.role in ['admin', 'superAdmin'];
+    }
+    function isSuperAdmin() {
+      return signedIn() && request.auth.token.role == 'superAdmin';
     }
     function isOwner(uid) {
       return signedIn() && request.auth.uid == uid;
@@ -43,6 +47,16 @@ service cloud.firestore {
 
     match /revenueDaily/{dayId} {
       allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /roleChanges/{changeId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
+    match /config/roles {
+      allow read: if isSuperAdmin();
       allow write: if false;
     }
 

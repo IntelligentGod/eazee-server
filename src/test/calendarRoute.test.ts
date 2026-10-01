@@ -42,6 +42,8 @@ function calendarCreateCall(id: string, overrides: Record<string, unknown> = {})
 test("compact calendar trusts the router model with bounded mechanical checks", async () => {
   process.env.AI_AUTH_REQUIRED = "false";
   process.env.APP_CHECK_REQUIRED = "false";
+  // A local .env may turn enforcement on; this test calls the AI routes without an account.
+  process.env.SUBSCRIPTION_ENFORCEMENT = "false";
   process.env.OPENAI_API_KEY = "test-key";
 
   const originalFetch = globalThis.fetch;

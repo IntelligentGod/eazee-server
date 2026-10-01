@@ -8,7 +8,6 @@ import {
   type SubscriptionConfigStore,
 } from "../usage/limitsConfig";
 import { assertXcodeTransactionsAllowed } from "../config";
-import { parseSetAdminArgs, withAdminClaim } from "../scripts/setAdmin";
 
 test("a missing or invalid stored config falls back to the defaults, section by section", () => {
   assert.deepEqual(parseSubscriptionConfig(undefined).limits, DEFAULT_SUBSCRIPTION_CONFIG.limits);
@@ -71,15 +70,4 @@ test("Xcode StoreKit transactions can only be allowed on a development server", 
   assert.doesNotThrow(() => assertXcodeTransactionsAllowed("production", false));
   assert.throws(() => assertXcodeTransactionsAllowed("production", true), /APP_ENV=development/);
   assert.throws(() => assertXcodeTransactionsAllowed("staging", true), /APP_ENV=development/);
-});
-
-test("setAdmin takes one account and keeps the other custom claims", () => {
-  assert.deepEqual(parseSetAdminArgs(["--email", "a@eazee.ai"]), { email: "a@eazee.ai", uid: null, remove: false });
-  assert.deepEqual(parseSetAdminArgs(["--uid", "u1", "--remove"]), { email: null, uid: "u1", remove: true });
-  assert.throws(() => parseSetAdminArgs([]));
-  assert.throws(() => parseSetAdminArgs(["--email", "a@eazee.ai", "--uid", "u1"]));
-
-  const pro = { plan: "yearly", expiresAt: 1, originalTransactionId: "t" };
-  assert.deepEqual(withAdminClaim({ eazeePro: pro }, true), { eazeePro: pro, admin: true });
-  assert.deepEqual(withAdminClaim({ eazeePro: pro, admin: true }, false), { eazeePro: pro });
 });
