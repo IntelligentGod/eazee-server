@@ -11,6 +11,9 @@ import {
 } from "../subscriptions/appleTransactions";
 import { decideEntitlement, getAppAccountTokenForUser, hasProAccess } from "../subscriptions/entitlement";
 import { createSubscriptionsRouter } from "../subscriptions/router";
+import { createMemorySubscriptionRecordsStore } from "../subscriptions/records";
+import { createMemoryConfigStore, createSubscriptionConfigProvider } from "../usage/limitsConfig";
+import { createMemoryUsageStore } from "../usage/usageStore";
 import { createProAccessMiddleware, isProOnlyAiPath } from "../subscriptions/proAccess";
 
 const UID = "user-1";
@@ -93,6 +96,11 @@ test("the verify endpoint saves Pro for the buyer and refuses other accounts' tr
   app.use("/subscriptions", createSubscriptionsRouter({
     bundleId: "com.eazee.ai",
     allowXcodeTransactions: false,
+    unlimitedEmails: [],
+    records: createMemorySubscriptionRecordsStore(),
+    config: createSubscriptionConfigProvider({ store: createMemoryConfigStore() }),
+    usage: createMemoryUsageStore(),
+    loadProfile: async () => ({ email: "buyer@example.com", displayName: null, providers: ["password"], authCreatedAt: 0 }),
     verifyRequest: async (req) => (req.header("authorization") ? { uid: UID, authTime: 0 } : null),
     verifyTransaction: async (jws) => {
       if (jws === "bad") throw new AppleTransactionVerificationError("Transaction signature is invalid");
@@ -115,7 +123,12 @@ test("the verify endpoint saves Pro for the buyer and refuses other accounts' tr
 
     const active = await post({ signedTransaction: "jws" });
     assert.equal(active.status, 200);
-    assert.deepEqual(await active.json(), { isPro: true, planId: "yearly", expiresAt: nextTransaction.expiresDate });
+    const activeBody = await active.json();
+    assert.deepEqual(
+      { isPro: activeBody.isPro, planId: activeBody.planId, expiresAt: activeBody.expiresAt },
+      { isPro: true, planId: "yearly", expiresAt: nextTransaction.expiresDate }
+    );
+    assert.equal(activeBody.subscription.state, "active");
     assert.equal((savedClaims.at(-1)?.[1] as any)?.plan, "yearly");
 
     nextTransaction = baseTransaction({ appAccountToken: getAppAccountTokenForUser("user-2") });
@@ -125,7 +138,11 @@ test("the verify endpoint saves Pro for the buyer and refuses other accounts' tr
 
     nextTransaction = baseTransaction({ expiresDate: Date.now() - 1 });
     const expired = await post({ signedTransaction: "jws" });
-    assert.deepEqual(await expired.json(), { isPro: false, planId: null, reason: "expired" });
+    const expiredBody = await expired.json();
+    assert.deepEqual(
+      { isPro: expiredBody.isPro, planId: expiredBody.planId, reason: expiredBody.reason },
+      { isPro: false, planId: null, reason: "expired" }
+    );
     assert.equal(savedClaims.at(-1)?.[1], null);
 
     assert.equal((await post({ signedTransaction: "bad" })).status, 400);
@@ -135,8 +152,9 @@ test("the verify endpoint saves Pro for the buyer and refuses other accounts' tr
 });
 
 test("Pro-only AI paths are gated only when enforcement is on", async () => {
-  assert.equal(isProOnlyAiPath("/ai/goal-guidance"), true);
-  assert.equal(isProOnlyAiPath("/ai/recipe/generate"), true);
+  assert.equal(isProOnlyAiPath("/ai/day-plan/todo-durations"), true);
+  assert.equal(isProOnlyAiPath("/ai/todo/classify"), true);
+  assert.equal(isProOnlyAiPath("/ai/goal-guidance"), false, "guidance has per-plan limits instead");
   assert.equal(isProOnlyAiPath("/ai/route"), false);
 
   let user: any = { uid: UID, authTime: 0 };
@@ -150,12 +168,12 @@ test("Pro-only AI paths are gated only when enforcement is on", async () => {
   const enforced = await listen(buildApp(true));
   const relaxed = await listen(buildApp(false));
   try {
-    assert.equal((await fetch(`${enforced.url}/ai/goal-guidance`, { method: "POST" })).status, 403);
+    assert.equal((await fetch(`${enforced.url}/ai/todo/classify`, { method: "POST" })).status, 403);
     assert.equal((await fetch(`${enforced.url}/ai/route`, { method: "POST" })).status, 200);
-    assert.equal((await fetch(`${relaxed.url}/ai/goal-guidance`, { method: "POST" })).status, 200);
+    assert.equal((await fetch(`${relaxed.url}/ai/todo/classify`, { method: "POST" })).status, 200);
 
     user = { ...user, proEntitlement: { plan: "yearly", expiresAt: Date.now() + 60_000, originalTransactionId: "t-1" } };
-    assert.equal((await fetch(`${enforced.url}/ai/goal-guidance`, { method: "POST" })).status, 200);
+    assert.equal((await fetch(`${enforced.url}/ai/todo/classify`, { method: "POST" })).status, 200);
   } finally {
     enforced.server.close();
     relaxed.server.close();

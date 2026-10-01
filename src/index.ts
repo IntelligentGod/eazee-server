@@ -16,11 +16,15 @@ import { createAiAuthMiddleware } from "./auth/ai";
 import { createAppCheckMiddleware } from "./auth/appCheck";
 import { isFirebaseAuthenticationError, verifyFirebaseRequest, type AuthenticatedUser } from "./auth/firebase";
 import { createDeepgramRouter } from "./deepgram";
-import { createSubscriptionsRouter } from "./subscriptions/router";
+import { createAppleNotificationsHandler, createSubscriptionsRouter } from "./subscriptions/router";
 import { createProAccessMiddleware } from "./subscriptions/proAccess";
+import { createFirestoreSubscriptionRecordsStore } from "./subscriptions/records";
+import { createAdminRouter } from "./admin/router";
 import { createFirestoreUsageStore, createMemoryUsageStore } from "./usage/usageStore";
+import { createFirestoreConfigStore, createSubscriptionConfigProvider } from "./usage/limitsConfig";
 import {
   createAiUsageLimitMiddleware,
+  createGuidanceLimitMiddleware,
   createUsageRouter,
   createVoiceUsageLimitMiddleware,
 } from "./usage/usageLimits";
@@ -2406,11 +2410,15 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true, status: "healthy" });
 });
 
-// Firestore is only touched once enforcement is on; until then nothing is metered.
+// Usage is only metered in Firestore once enforcement is on. Subscription records
+// and the limits config always live in Firestore (see FIRESTORE.md).
+const subscriptionRecords = createFirestoreSubscriptionRecordsStore();
+const subscriptionConfig = createSubscriptionConfigProvider({ store: createFirestoreConfigStore(), ttlMs: 60_000 });
 const usageLimitOptions = {
   enabled: config.subscriptionEnforcement,
   unlimitedEmails: config.subscriptionUnlimitedEmails,
   store: config.subscriptionEnforcement ? createFirestoreUsageStore() : createMemoryUsageStore(),
+  config: subscriptionConfig,
 };
 
 app.use(
@@ -2422,12 +2430,33 @@ app.use(
 
 app.use("/usage", appCheckMiddleware, createUsageRouter(usageLimitOptions));
 
+// Apple calls this without App Check or a Firebase token; it verifies Apple's signature instead.
+app.post(
+  "/subscriptions/apple/notifications",
+  createAppleNotificationsHandler({ bundleId: config.appleBundleId, records: subscriptionRecords })
+);
+
 app.use(
   "/subscriptions",
   appCheckMiddleware,
   createSubscriptionsRouter({
     bundleId: config.appleBundleId,
     allowXcodeTransactions: config.appleAllowXcodeTransactions,
+    unlimitedEmails: config.subscriptionUnlimitedEmails,
+    records: subscriptionRecords,
+    config: subscriptionConfig,
+    usage: usageLimitOptions.store,
+  })
+);
+
+app.use(
+  "/admin",
+  appCheckMiddleware,
+  createAdminRouter({
+    records: subscriptionRecords,
+    config: subscriptionConfig,
+    usage: usageLimitOptions.store,
+    unlimitedEmails: config.subscriptionUnlimitedEmails,
   })
 );
 
@@ -2644,6 +2673,7 @@ app.use(
     enabled: config.subscriptionEnforcement,
     unlimitedEmails: config.subscriptionUnlimitedEmails,
   }),
+  createGuidanceLimitMiddleware(usageLimitOptions),
   createAiUsageLimitMiddleware(usageLimitOptions)
 );
 

@@ -16,6 +16,8 @@ export type AuthenticatedUser = {
   authTime: number;
   /** Verified Eazee Pro subscription, from the user's custom claims. */
   proEntitlement?: ProEntitlementClaim | null;
+  /** The `admin: true` custom claim, set only by scripts/setAdmin.ts. */
+  isAdmin?: boolean;
 };
 
 function readProEntitlementClaim(value: unknown): ProEntitlementClaim | null {
@@ -96,5 +98,6 @@ export async function verifyFirebaseRequest(
     displayName,
     authTime: decoded.auth_time,
     proEntitlement: readProEntitlementClaim(decoded[PRO_CLAIM_KEY]),
+    isAdmin: decoded.admin === true,
   };
 }

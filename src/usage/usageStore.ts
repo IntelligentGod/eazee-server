@@ -1,9 +1,6 @@
 import { FieldValue, getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getFirebaseAuth } from "../auth/firebase";
 
-/** Mirrors the app's free plan (lib/subscription.ts). */
-export const FREE_DAILY_AI_ACTIONS = 5;
-export const FREE_DAILY_VOICE_SECONDS = 2 * 60;
 /**
  * Follow-up requests the app marks as free (chat titles, summaries). The mark
  * comes from the client, so it is capped: past this, they count as AI actions.
@@ -12,22 +9,48 @@ export const FREE_DAILY_UNCHARGED_REQUESTS = 40;
 /** Days a usage document is kept; set a Firestore TTL policy on `expireAt` to delete old ones. */
 const USAGE_RETENTION_DAYS = 7;
 
-export type DailyUsage = { aiActions: number; voiceSeconds: number; unchargedRequests: number };
+/** Counters kept per user per day. Guidance counters are named after GUIDANCE_FEATURES. */
+export const USAGE_COUNTERS = [
+  "aiActions",
+  "unchargedRequests",
+  "guidanceGoal",
+  "guidanceTask",
+  "guidanceRecipeSkill",
+  "guidanceQuestions",
+] as const;
+export type UsageCounter = (typeof USAGE_COUNTERS)[number];
+
+export type DailyUsage = Record<UsageCounter, number> & { voiceSeconds: number };
+export type DailyUsageEntry = DailyUsage & { day: string };
 
 export interface UsageStore {
-  /** Adds one to `field` unless that would pass `limit`; returns whether it was added. */
-  consume(uid: string, day: string, field: "aiActions" | "unchargedRequests", limit: number): Promise<boolean>;
+  /** Adds one to `field` unless that would pass `limit` (null: no limit); returns whether it was added. */
+  consume(uid: string, day: string, field: UsageCounter, limit: number | null): Promise<boolean>;
   addVoiceSeconds(uid: string, day: string, seconds: number): Promise<void>;
   get(uid: string, day: string): Promise<DailyUsage>;
+  /** Newest first, at most `limit` days (old days expire after USAGE_RETENTION_DAYS). */
+  listRecent(uid: string, limit: number): Promise<DailyUsageEntry[]>;
 }
 
-const EMPTY_USAGE: DailyUsage = { aiActions: 0, voiceSeconds: 0, unchargedRequests: 0 };
+export const EMPTY_USAGE: DailyUsage = {
+  aiActions: 0,
+  voiceSeconds: 0,
+  unchargedRequests: 0,
+  guidanceGoal: 0,
+  guidanceTask: 0,
+  guidanceRecipeSkill: 0,
+  guidanceQuestions: 0,
+};
 
-const readUsage = (data: FirebaseFirestore.DocumentData | undefined): DailyUsage => ({
-  aiActions: Number(data?.aiActions) || 0,
-  voiceSeconds: Number(data?.voiceSeconds) || 0,
-  unchargedRequests: Number(data?.unchargedRequests) || 0,
-});
+const readUsage = (data: FirebaseFirestore.DocumentData | undefined): DailyUsage => {
+  const usage = { ...EMPTY_USAGE };
+  for (const field of [...USAGE_COUNTERS, "voiceSeconds"] as const) {
+    usage[field] = Number(data?.[field]) || 0;
+  }
+  return usage;
+};
+
+const isWithinLimit = (used: number, limit: number | null) => limit === null || used < limit;
 
 /** One document per user per day: `aiUsage/{uid}/days/{YYYY-MM-DD}`. Only the server writes these. */
 export function createFirestoreUsageStore(): UsageStore {
@@ -42,7 +65,7 @@ export function createFirestoreUsageStore(): UsageStore {
       // A transaction, so two requests at once cannot both take the last free action.
       return firestore.runTransaction(async (transaction) => {
         const usage = readUsage((await transaction.get(ref)).data());
-        if (usage[field] >= limit) return false;
+        if (!isWithinLimit(usage[field], limit)) return false;
         transaction.set(ref, { [field]: usage[field] + 1, day, updatedAt: FieldValue.serverTimestamp(), expireAt: expireAt() }, { merge: true });
         return true;
       });
@@ -56,6 +79,11 @@ export function createFirestoreUsageStore(): UsageStore {
     async get(uid, day) {
       return readUsage((await dayDoc(uid, day).get()).data());
     },
+    async listRecent(uid, limit) {
+      const snapshot = await firestore.collection("aiUsage").doc(uid).collection("days")
+        .orderBy("day", "desc").limit(limit).get();
+      return snapshot.docs.map((doc) => ({ ...readUsage(doc.data()), day: doc.id }));
+    },
   };
 }
 
@@ -66,7 +94,7 @@ export function createMemoryUsageStore(): UsageStore {
   return {
     async consume(uid, day, field, limit) {
       const usage = read(uid, day);
-      if (usage[field] >= limit) return false;
+      if (!isWithinLimit(usage[field], limit)) return false;
       days.set(`${uid}/${day}`, { ...usage, [field]: usage[field] + 1 });
       return true;
     },
@@ -76,6 +104,13 @@ export function createMemoryUsageStore(): UsageStore {
     },
     async get(uid, day) {
       return read(uid, day);
+    },
+    async listRecent(uid, limit) {
+      return [...days.entries()]
+        .filter(([key]) => key.startsWith(`${uid}/`))
+        .map(([key, usage]) => ({ ...usage, day: key.slice(uid.length + 1) }))
+        .sort((a, b) => b.day.localeCompare(a.day))
+        .slice(0, limit);
     },
   };
 }

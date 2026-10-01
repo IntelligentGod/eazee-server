@@ -9,7 +9,9 @@
     "build:watch": "tsc -w -p tsconfig.json --preserveWatchOutput",
     "dev": "npm run build && node scripts/dev.js",
     "start": "node dist/index.js",
-    "test": "npm run build && node --test dist/test/*.js"
+    "test": "npm run build && node --test dist/test/*.js",
+    "set-admin": "npm run build && node dist/scripts/setAdmin.js",
+    "backfill-users": "npm run build && node dist/scripts/backfillUsers.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

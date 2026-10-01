@@ -7,17 +7,13 @@ import {
 import { hasProAccess } from "./entitlement";
 
 /**
- * AI endpoints behind the app's Pro-only features (day planning, guidance, todo
- * classification, recipes and skills). Mirrors PRO_ONLY_FEATURES in the app.
+ * AI endpoints behind the app's Pro-only features (day planning, todo
+ * classification). Mirrors PRO_ONLY_FEATURES in the app. Guidance (goals,
+ * tasks, recipes, skills) has per-plan limits instead; see GUIDANCE_PATHS.
  */
 export const PRO_ONLY_AI_PATH_PREFIXES = [
   "/ai/day-plan/",
-  "/ai/goal-guidance",
-  "/ai/task-guidance",
-  "/ai/guidance/",
   "/ai/todo/classify",
-  "/ai/recipe/",
-  "/ai/skill/",
 ];
 
 export const isProOnlyAiPath = (path: string) =>

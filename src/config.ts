@@ -41,7 +41,9 @@ type Config = {
   appCheckRequired: boolean;
   appCheckAllowedAppIds: string[];
   appleBundleId: string;
-  /** Accept Xcode's locally signed StoreKit test transactions. Development servers only. */
+  /** "development" on local servers; anything else (or unset) is treated as production. */
+  appEnv: string;
+  /** Accept Xcode's locally signed StoreKit test transactions. Only allowed with APP_ENV=development. */
   appleAllowXcodeTransactions: boolean;
   /** Refuse Pro-only AI endpoints to accounts without a verified subscription. */
   subscriptionEnforcement: boolean;
@@ -64,11 +66,27 @@ function parseCommaSeparatedValues(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Xcode StoreKit test transactions are not signed by Apple, so accepting them
+ * lets anyone forge a subscription. A server that is not explicitly a
+ * development server refuses to start with the flag on.
+ */
+export function assertXcodeTransactionsAllowed(appEnv: string, allowXcodeTransactions: boolean) {
+  if (allowXcodeTransactions && appEnv !== "development") {
+    throw new Error(
+      "APPLE_ALLOW_XCODE_TRANSACTIONS=true is only allowed when APP_ENV=development. Remove it from production."
+    );
+  }
+}
+
 export function getConfig(): Config {
   // PORT is injected by the hosting platform (DigitalOcean App Platform, Heroku, Cloud Run).
   // It must take precedence over SERVER_PORT: if a stale SERVER_PORT wins, the app binds a
   // port the platform is not routing to, no health check ever passes, and the edge serves 503.
   const port = Number(process.env.PORT || process.env.SERVER_PORT || 8787);
+  const appEnv = process.env.APP_ENV?.trim().toLowerCase() || "production";
+  const appleAllowXcodeTransactions = process.env.APPLE_ALLOW_XCODE_TRANSACTIONS?.trim().toLowerCase() === "true";
+  assertXcodeTransactionsAllowed(appEnv, appleAllowXcodeTransactions);
   return {
     port: Number.isFinite(port) ? port : 8787,
     allowedOrigins: parseAllowedOrigins(process.env.ALLOWED_ORIGINS),
@@ -88,7 +106,8 @@ export function getConfig(): Config {
     appCheckRequired: process.env.APP_CHECK_REQUIRED?.trim().toLowerCase() === "true",
     appCheckAllowedAppIds: parseCommaSeparatedValues(process.env.APP_CHECK_ALLOWED_APP_IDS),
     appleBundleId: process.env.APPLE_BUNDLE_ID?.trim() || "com.eazee.ai",
-    appleAllowXcodeTransactions: process.env.APPLE_ALLOW_XCODE_TRANSACTIONS?.trim().toLowerCase() === "true",
+    appEnv,
+    appleAllowXcodeTransactions,
     subscriptionEnforcement: process.env.SUBSCRIPTION_ENFORCEMENT?.trim().toLowerCase() === "true",
     subscriptionUnlimitedEmails: parseCommaSeparatedValues(
       process.env.SUBSCRIPTION_UNLIMITED_EMAILS ?? "developer_sandbox@eazee.ai"
