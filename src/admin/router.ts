@@ -22,7 +22,7 @@ import {
   type SubscriptionConfigProvider,
 } from "../usage/limitsConfig";
 import type { UsageStore } from "../usage/usageStore";
-import { ASSIGNABLE_ROLES, ROLES, isStaffRole, migrateLegacyClaims, type Role } from "../auth/roles";
+import { ASSIGNABLE_ROLES, isStaffRole, migrateLegacyClaims, type Role } from "../auth/roles";
 import { RoleChangeError, changeUserRole, createFirebaseRoleAuth, type RoleAuth } from "./roleService";
 
 type AdminRequest = Request & { admin?: AuthenticatedUser };
@@ -66,7 +66,7 @@ const StatusSchema = z.enum(["active", "cancelled", "expired", "upgraded", "refu
 
 const UsersQuerySchema = z.object({
   search: z.string().trim().max(200).optional(),
-  role: z.enum(ROLES).optional(),
+  role: z.enum(ASSIGNABLE_ROLES).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   cursor: z.string().min(1).max(200).optional(),
 });
@@ -264,7 +264,8 @@ export function createAdminRouter(options: AdminRouterOptions) {
     const users = await options.records.listUsers(query.data);
     const at = now();
     res.json({
-      users: users.map((user) => presentUser(user, at)),
+      // The Super Admin is never listed: its role cannot be changed, and it is not managed here.
+      users: users.filter((user) => user.role !== "superAdmin").map((user) => presentUser(user, at)),
       nextCursor: users.length === query.data.limit ? users[users.length - 1].uid : null,
     });
   }));

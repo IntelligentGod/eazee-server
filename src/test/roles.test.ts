@@ -218,6 +218,10 @@ test("admins and super admins can use the admin panel, filtered by role", async 
     const admins = await (await request("/admin/users?role=admin", "super")).json();
     assert.deepEqual(admins.users.map((user: any) => [user.uid, user.role]), [["admin-1", "admin"]]);
     assert.equal((await request("/admin/users?role=owner", "super")).status, 400);
+
+    const everyone = await (await request("/admin/users", "super")).json();
+    assert.deepEqual(everyone.users.map((user: any) => user.uid).sort(), ["admin-1", "erin"], "the super admin is never listed");
+    assert.equal((await request("/admin/users?role=superAdmin", "super")).status, 400, "nor offered as a filter");
   } finally {
     server.close();
   }
