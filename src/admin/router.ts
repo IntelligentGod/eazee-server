@@ -8,6 +8,7 @@ import {
 } from "../auth/firebase";
 import {
   deriveSubscriptionState,
+  hasProEntitlement,
   transactionDisplayStatus,
   utcDay,
   type RevenueDay,
@@ -166,9 +167,10 @@ export function summarizeIncome(input: {
   for (const user of input.subscribers) {
     if ((user.environment || "Production") !== input.environment) continue;
     const state = deriveSubscriptionState(user, input.now);
-    if (state !== "active" && state !== "cancelled" && state !== "billing_retry") continue;
-    if (state === "active") subscribers.active += 1;
+    // Cancelled subscriptions no longer have Pro; they are counted but not as subscribers.
     if (state === "cancelled") subscribers.cancelled += 1;
+    if (!hasProEntitlement(state)) continue;
+    if (state === "active") subscribers.active += 1;
     if (state === "billing_retry") subscribers.billingRetry += 1;
     if (user.plan === "monthly" || user.plan === "yearly") subscribers.byPlan[user.plan] += 1;
     const isTrial = user.currentPriceMilli === 0;

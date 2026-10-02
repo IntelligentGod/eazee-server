@@ -148,6 +148,13 @@ export function deriveSubscriptionState(user: UserRecord, now: number): Subscrip
   return "active";
 }
 
+/**
+ * Whether a subscription in this state gives Pro. Cancelling (turning auto-renew
+ * off) ends Pro at once, a product decision: the account goes back to Free even
+ * though Apple keeps the period paid. Turning renewal back on restores it.
+ */
+export const hasProEntitlement = (state: SubscriptionState) => state === "active" || state === "billing_retry";
+
 export function transactionDisplayStatus(record: TransactionRecord, now: number): TransactionState {
   if (record.status === "refunded" || record.revocationDate) return "refunded";
   if (record.status === "upgraded") return "upgraded";

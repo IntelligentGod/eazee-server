@@ -24,6 +24,7 @@ import {
 } from "./entitlement";
 import {
   deriveSubscriptionState,
+  hasProEntitlement,
   transactionDisplayStatus,
   type SubscriptionRecordsStore,
   type TransactionRecord,
@@ -95,17 +96,19 @@ export async function loadProfileFromFirebase(uid: string): Promise<UserProfile>
   };
 }
 
-/** The claim follows the stored subscription, so an old transaction replayed later cannot switch Pro off. */
+/**
+ * The claim follows the stored subscription, so an old transaction replayed later
+ * cannot switch Pro off. A cancelled subscription has no claim (see hasProEntitlement).
+ */
 export function claimForUser(user: UserRecord, now: number): ProEntitlementClaim | null {
-  const state = deriveSubscriptionState(user, now);
-  if (state === "none" || state === "expired" || state === "refunded") return null;
+  if (!hasProEntitlement(deriveSubscriptionState(user, now))) return null;
   if (user.plan === "free" || !user.expiresAt || !user.originalTransactionId) return null;
   return { plan: user.plan, expiresAt: user.expiresAt, originalTransactionId: user.originalTransactionId };
 }
 
 export function summarizeSubscription(user: UserRecord | null, options: { now: number; unlimited: boolean }) {
   const state = user ? deriveSubscriptionState(user, options.now) : "none";
-  const entitled = state === "active" || state === "cancelled" || state === "billing_retry";
+  const entitled = hasProEntitlement(state);
   return {
     isPro: entitled || options.unlimited,
     isUnlimitedAccount: options.unlimited,

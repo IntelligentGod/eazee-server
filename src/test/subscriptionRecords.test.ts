@@ -7,6 +7,7 @@ import {
   classifyTransaction,
   createMemorySubscriptionRecordsStore,
   deriveSubscriptionState,
+  hasProEntitlement,
   newUserRecord,
   transactionDisplayStatus,
 } from "../subscriptions/records";
@@ -83,7 +84,10 @@ test("buying monthly, upgrading to yearly and cancelling are recorded", async ()
   assert.equal(transactionDisplayStatus(history[0], upgradedAt), "active");
 
   const cancelled = await store.updateRenewal(UID, { autoRenew: false, pendingProductId: null, source: "device" }, upgradedAt + DAY);
-  assert.equal(deriveSubscriptionState(cancelled!, upgradedAt + DAY), "cancelled", "cancelled but active until expiry");
+  assert.equal(deriveSubscriptionState(cancelled!, upgradedAt + DAY), "cancelled");
+  assert.equal(hasProEntitlement(deriveSubscriptionState(cancelled!, upgradedAt + DAY)), false, "cancelling ends Pro at once");
+  assert.equal(hasProEntitlement("active"), true);
+  assert.equal(hasProEntitlement("billing_retry"), true);
   const [current] = await store.listUserTransactions(UID, { limit: 1 });
   assert.equal(transactionDisplayStatus(current, upgradedAt + DAY), "cancelled");
   assert.equal(deriveSubscriptionState(cancelled!, upgradedAt + 366 * DAY), "expired");

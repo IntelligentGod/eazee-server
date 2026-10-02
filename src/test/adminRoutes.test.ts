@@ -148,6 +148,7 @@ test("income totals revenue per day and product, labelled estimated", async () =
     assert.deepEqual(income.buckets.map((b: any) => b.period), ["2026-10-13", "2026-10-14"]);
     assert.equal(income.subscribers.active, 1);
     assert.equal(income.subscribers.cancelled, 1);
+    assert.deepEqual(income.subscribers.byPlan, { monthly: 1, yearly: 0 }, "a cancelled plan no longer counts as a subscriber");
     assert.deepEqual(income.subscribers.mrr, { USD: 9.99 }, "cancelled subscriptions are left out of MRR");
 
     const monthly = await (await request("/admin/income?granularity=month&from=2026-10-01&to=2026-10-15")).json();

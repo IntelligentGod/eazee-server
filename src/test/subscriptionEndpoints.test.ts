@@ -132,9 +132,11 @@ test("buy monthly, upgrade to yearly, cancel: history, status and the Pro claim 
       signedTransactions: [upgrade],
       renewal: { productId: YEARLY, willAutoRenew: false },
     })).json();
-    assert.equal(cancelled.isPro, true, "a cancelled subscription stays active until it expires");
+    assert.equal(cancelled.isPro, false, "cancelling ends Pro at once");
+    assert.equal(cancelled.subscription.isPro, false);
     assert.equal(cancelled.subscription.state, "cancelled");
     assert.equal(cancelled.subscription.autoRenew, false);
+    assert.equal(claims.get(UID), null, "the Pro claim is removed, so the server treats the account as Free");
 
     const history = await (await request("GET", "/subscriptions/history")).json();
     assert.deepEqual(
@@ -142,6 +144,13 @@ test("buy monthly, upgrade to yearly, cancel: history, status and the Pro claim 
       [[YEARLY, "upgrade", "cancelled", 79.99], [MONTHLY, "purchase", "upgraded", 9.99]]
     );
     assert.equal(history.nextCursor, null);
+
+    const resubscribed = await (await request("POST", "/subscriptions/apple/sync", {
+      signedTransactions: [upgrade],
+      renewal: { productId: YEARLY, willAutoRenew: true },
+    })).json();
+    assert.equal(resubscribed.isPro, true, "turning renewal back on restores Pro");
+    assert.equal(claims.get(UID)?.plan, "yearly");
   } finally {
     server.close();
   }
@@ -191,7 +200,10 @@ test("App Store notifications renew, cancel and refund, and are verified first",
     const cancelled = await records.getUser(UID);
     assert.equal(cancelled?.autoRenew, false);
     assert.equal(cancelled?.autoRenewSource, "apple");
-    assert.equal(claims.get(UID)?.plan, "monthly", "still Pro until the period ends");
+    assert.equal(claims.get(UID), null, "cancelling ends Pro at once");
+
+    assert.equal((await notify("DID_CHANGE_RENEWAL_STATUS", renewalJws, { autoRenewStatus: 1 })).status, 200);
+    assert.equal(claims.get(UID)?.plan, "monthly", "renewal turned back on restores Pro");
 
     const refunded = jws({ transactionId: "1001", transactionReason: "RENEWAL", purchaseDate: Date.now(), expiresDate: Date.now() + 60 * DAY, revocationDate: Date.now() });
     assert.equal((await notify("REFUND", refunded)).status, 200);
