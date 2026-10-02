@@ -88,3 +88,16 @@ test("plan_my_day tells the model to preserve vague dayparts structurally", () =
   assert.match(description, /set daypart so the client can enforce that window even when the title is cleaned/);
   assert.match(description, /Never schedule a night\/tonight item in the afternoon/);
 });
+
+test("plan_my_week takes one main goal per day", () => {
+  const day = (date: string) => ({ date, mainGoal: "Record pronunciation baseline" });
+  const validation = validateToolCall("plan_my_week", { days: [day("2026-10-02"), day("2026-10-03"), day("2026-10-04")] });
+  assert.equal(validation.ok, true);
+  if (validation.ok) assert.equal(validation.data.days.length, 3);
+
+  assert.equal(validateToolCall("plan_my_week", { days: [{ date: "2026-10-02" }] }).ok, false);
+  assert.equal(validateToolCall("plan_my_week", { days: [] }).ok, false);
+
+  const tool = getOpenAIToolDefsByNames(["plan_my_week"])[0] as any;
+  assert.deepEqual(tool?.function?.parameters?.properties?.days?.items?.required, ["date", "mainGoal"]);
+});

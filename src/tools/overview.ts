@@ -26,6 +26,16 @@ export const PlanMyDaySchema = z.object({
   ).min(1),
 });
 
+/** Fix my life drafts every remaining day of the week in one call; a client tool call ends the model's turn. */
+export const PlanMyWeekSchema = z.object({
+  days: z.array(
+    z.object({
+      date: z.string(),
+      mainGoal: z.string().min(1),
+    })
+  ).min(1).max(7),
+});
+
 export const SaveDayPlanSchema = z.object({});
 
 export const DailyOverviewParameters = {
@@ -124,6 +134,33 @@ export const PlanMyDayParameters = {
   additionalProperties: false,
 };
 
+export const PlanMyWeekParameters = {
+  type: "object",
+  properties: {
+    days: {
+      type: "array",
+      description: "One entry per day being planned, in date order.",
+      items: {
+        type: "object",
+        properties: {
+          date: {
+            type: "string",
+            description: "The day in YYYY-MM-DD format.",
+          },
+          mainGoal: {
+            type: "string",
+            description: "The day's one plan: its main goal in a few words, such as 'Record pronunciation baseline'. No details or times.",
+          },
+        },
+        required: ["date", "mainGoal"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["days"],
+  additionalProperties: false,
+};
+
 export const overviewTools: ToolDef[] = [
   {
     name: "plan_my_day",
@@ -132,6 +169,14 @@ export const overviewTools: ToolDef[] = [
     mode: "client",
     schema: PlanMyDaySchema,
     parameters: PlanMyDayParameters,
+  },
+  {
+    name: "plan_my_week",
+    description:
+      "Draft a plan for several days at once, such as the rest of the week in Fix my life. Each day has exactly one plan: a short mainGoal, with no timeline, times or details. The client shows one card per day and saves the goal as that day's todo. Use this instead of calling plan_my_day once per day.",
+    mode: "client",
+    schema: PlanMyWeekSchema,
+    parameters: PlanMyWeekParameters,
   },
   {
     name: "save_day_plan",
