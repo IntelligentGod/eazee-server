@@ -28,10 +28,12 @@ export const PlanMyDaySchema = z.object({
 
 /** Fix my life drafts every remaining day of the week in one call; a client tool call ends the model's turn. */
 export const PlanMyWeekSchema = z.object({
+  weekGoal: z.string().min(1).optional(),
   days: z.array(
     z.object({
       date: z.string(),
       mainGoal: z.string().min(1),
+      items: PlanMyDaySchema.shape.items.max(5).optional(),
     })
   ).min(1).max(7),
 });
@@ -137,6 +139,10 @@ export const PlanMyDayParameters = {
 export const PlanMyWeekParameters = {
   type: "object",
   properties: {
+    weekGoal: {
+      type: "string",
+      description: "The goal this week is planned around, as a short title (e.g. 'Study four languages'). Always include it; the app saves it as a This Week goal if it is new.",
+    },
     days: {
       type: "array",
       description: "One entry per day being planned, in date order.",
@@ -149,7 +155,12 @@ export const PlanMyWeekParameters = {
           },
           mainGoal: {
             type: "string",
-            description: "The day's one plan: its main goal in a few words, such as 'Record pronunciation baseline'. No details or times.",
+            description: "The day's main goal in a few words, such as 'Record pronunciation baseline'.",
+          },
+          items: {
+            ...PlanMyDayParameters.properties.items,
+            maxItems: 5,
+            description: "The day's timeline: at most 5 items, each with a start time and duration. The first item is the main goal step. Short titles only; never details.",
           },
         },
         required: ["date", "mainGoal"],
@@ -173,7 +184,7 @@ export const overviewTools: ToolDef[] = [
   {
     name: "plan_my_week",
     description:
-      "Draft a plan for several days at once, such as the rest of the week in Fix my life. Each day has exactly one plan: a short mainGoal, with no timeline, times or details. The client shows one card per day and saves the goal as that day's todo. Use this instead of calling plan_my_day once per day.",
+      "Draft a plan for several days at once, such as the rest of the week in Fix my life. Each day has a short mainGoal and a timeline of at most 5 timed items (the first is the main goal step), following the same item rules as plan_my_day, with no details. The client shows one card per day. Use this instead of calling plan_my_day once per day.",
     mode: "client",
     schema: PlanMyWeekSchema,
     parameters: PlanMyWeekParameters,
