@@ -1,3 +1,4 @@
+import type { AuthenticatedUser } from "../auth/firebase";
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
@@ -42,7 +43,8 @@ async function startApp() {
     config: createSubscriptionConfigProvider({ store: createMemoryConfigStore() }),
     verifyRequest: async (req) => {
       const uid = req.header("x-test-uid");
-      return uid ? { uid, email: req.header("x-test-email") || `${uid}@example.com`, authTime: 0 } : null;
+      const role = req.header("x-test-role") as AuthenticatedUser["role"];
+      return uid ? { uid, email: req.header("x-test-email") || `${uid}@example.com`, authTime: 0, ...(role ? { role } : {}) } : null;
     },
     verifyTransaction: async (jws) => decode(jws) as AppleTransaction,
     setProClaim: async (uid, claim) => { claims.set(uid, claim); },
@@ -107,6 +109,15 @@ test("status reports the plan, limits and today's usage, creating the user recor
     assert.equal(sandbox.subscription.isPro, true);
     assert.equal(sandbox.subscription.isUnlimitedAccount, true);
     assert.equal(sandbox.planLimits.chatMessagesPerDay, null);
+
+    for (const role of ["admin", "superAdmin"]) {
+      const staff = await (await fetch(
+        `http://127.0.0.1:${(server.address() as AddressInfo).port}/subscriptions/status`,
+        { headers: { "x-test-uid": `staff-${role}`, "x-test-role": role } }
+      )).json();
+      assert.equal(staff.subscription.isPro, true, `${role} is Pro`);
+      assert.equal(staff.planLimits.chatMessagesPerDay, null);
+    }
   } finally {
     server.close();
   }

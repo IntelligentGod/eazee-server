@@ -231,8 +231,10 @@ export function createAdminRouter(options: AdminRouterOptions) {
   const getAuthUser = options.getAuthUser ?? getAuthUserFromFirebase;
   let roleAuth = options.roleAuth;
   const getRoleAuth = () => (roleAuth ??= createFirebaseRoleAuth());
-  const isUnlimited = (email: string | null) =>
-    !!email && options.unlimitedEmails.includes(email.trim().toLowerCase());
+  // Staff are Pro without a purchase, like the unlimited-access emails.
+  const isUnlimited = (user: UserRecord) =>
+    isStaffRole(user.role)
+    || (!!user.email && options.unlimitedEmails.includes(user.email.trim().toLowerCase()));
 
   router.use(createRequireAdminMiddleware({ verifyRequest: options.verifyRequest }));
 
@@ -243,7 +245,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     role: user.role,
     providers: user.providers,
     createdAt: user.authCreatedAt ?? user.createdAt,
-    subscription: summarizeSubscription(user, { now: at, unlimited: isUnlimited(user.email) }),
+    subscription: summarizeSubscription(user, { now: at, unlimited: isUnlimited(user) }),
   });
 
   const handle = (fn: RequestHandler): RequestHandler => async (req, res, next) => {

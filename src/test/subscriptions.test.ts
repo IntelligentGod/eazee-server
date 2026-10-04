@@ -68,6 +68,13 @@ test("Pro access comes from an unexpired claim or the unlimited-email list", () 
   assert.equal(hasProAccess({ email: "someone@eazee.ai" }, options), false);
 });
 
+test("admins and the super admin are Pro without a purchase; customers are not", () => {
+  const options = { unlimitedEmails: [], now: NOW };
+  assert.equal(hasProAccess({ email: "staff@eazee.ai", role: "admin" }, options), true);
+  assert.equal(hasProAccess({ email: "owner@eazee.ai", role: "superAdmin" }, options), true);
+  assert.equal(hasProAccess({ email: "someone@eazee.ai", role: "customer" }, options), false);
+});
+
 test("the verifier rejects anything not signed with an App Store certificate chain", async () => {
   const { privateKey } = await generateKeyPair("ES256");
   const unchained = await new SignJWT(baseTransaction() as any).setProtectedHeader({ alg: "ES256" }).sign(privateKey);

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AppleTransaction } from "./appleTransactions";
+import { isStaffRole, type Role } from "../auth/roles";
 
 export type ProPlanId = "monthly" | "yearly";
 
@@ -64,11 +65,12 @@ export function decideEntitlement(
   };
 }
 
-/** Pro when the claim has not expired, or the account is on the unlimited-access list. */
+/** Pro when the claim has not expired, the account is staff (admin or super admin), or it is on the unlimited-access list. */
 export function hasProAccess(
-  user: { email?: string; proEntitlement?: ProEntitlementClaim | null },
+  user: { email?: string; role?: Role; proEntitlement?: ProEntitlementClaim | null },
   options: { unlimitedEmails: string[]; now?: number }
 ) {
+  if (user.role && isStaffRole(user.role)) return true;
   const email = String(user.email || "").trim().toLowerCase();
   if (email && options.unlimitedEmails.includes(email)) return true;
   return !!user.proEntitlement && user.proEntitlement.expiresAt > (options.now ?? Date.now());

@@ -173,8 +173,9 @@ export function createSubscriptionsRouter(options: SubscriptionsRouterOptions) {
     }
   };
 
+  // Staff (admin, super admin) and unlimited-access emails are Pro without a purchase.
   const isUnlimited = (user: AuthenticatedUser) =>
-    hasProAccess({ email: user.email }, { unlimitedEmails: options.unlimitedEmails });
+    hasProAccess({ email: user.email, role: user.role }, { unlimitedEmails: options.unlimitedEmails });
 
   const ensureUser = (user: AuthenticatedUser) => options.records.ensureUser(user.uid, () => loadProfile(user.uid, user));
 
