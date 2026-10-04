@@ -39,13 +39,30 @@ const FIREBASE_AUTHENTICATION_ERROR_CODES = new Set([
 
 let firebaseAppInitialized = false;
 
+/**
+ * FIREBASE_SERVICE_ACCOUNT_JSON holds the service account as JSON, or as that JSON
+ * base64-encoded (easier to paste into hosting dashboards). The error never
+ * repeats the value, since it is a secret.
+ */
+export function parseServiceAccount(value: string): Record<string, any> {
+  const trimmed = value.trim();
+  const json = trimmed.startsWith("{") ? trimmed : Buffer.from(trimmed, "base64").toString("utf8").trim();
+  try {
+    const parsed = JSON.parse(json);
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch {
+    // Reported below without the value.
+  }
+  throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON must be the service account JSON or that JSON base64-encoded.");
+}
+
 function getFirebaseCredential() {
   const { firebaseServiceAccountJson } = getConfig();
   if (!firebaseServiceAccountJson) {
     return applicationDefault();
   }
 
-  const serviceAccount = JSON.parse(firebaseServiceAccountJson);
+  const serviceAccount = parseServiceAccount(firebaseServiceAccountJson);
   if (typeof serviceAccount.private_key === "string") {
     serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
   }
