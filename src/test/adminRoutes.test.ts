@@ -178,11 +178,11 @@ test("admins can change limits and product display settings, validated", async (
   const { server, request, config } = await startApp();
   try {
     const limits = structuredClone(DEFAULT_SUBSCRIPTION_CONFIG.limits);
-    limits.free.chatMessagesPerDay = 10;
+    limits.free.guidance.taskGuidance = 10;
     limits.free.guidance.goalGuidance = 2;
     const saved = await request("/admin/config/limits", { method: "PUT", body: { limits } });
     assert.equal(saved.status, 200);
-    assert.equal((await config.get()).limits.free.chatMessagesPerDay, 10);
+    assert.equal((await config.get()).limits.free.guidance.taskGuidance, 10);
     assert.equal((await config.get()).updatedBy, "admin@eazee.ai");
 
     const invalid = structuredClone(limits) as any;

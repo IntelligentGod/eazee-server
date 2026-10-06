@@ -51,14 +51,14 @@ export type SubscriptionConfig = {
 
 /**
  * Used until an admin saves `config/subscription`, and whenever it cannot be
- * read. Matches the limits the app shipped with: free gets 5 AI actions and 2
- * voice minutes a day and no guidance; Pro is unlimited.
+ * read. AI chat and voice input are unlimited on every plan; Free gets no
+ * guidance, Pro is unlimited.
  */
 export const DEFAULT_SUBSCRIPTION_CONFIG: SubscriptionConfig = {
   limits: {
     free: {
-      chatMessagesPerDay: 5,
-      voiceMinutesPerDay: 2,
+      chatMessagesPerDay: null,
+      voiceMinutesPerDay: null,
       guidance: { goalGuidance: 0, taskGuidance: 0, recipeSkillGuide: 0, guidanceQuestions: 0 },
     },
     pro: {
@@ -79,13 +79,22 @@ export const DEFAULT_SUBSCRIPTION_CONFIG: SubscriptionConfig = {
  * Reads a stored config, keeping the default for any part that is missing or
  * invalid, so one bad field never removes every limit.
  */
+/**
+ * AI chat and voice input have no daily limit on any plan; a limit saved before
+ * that decision is ignored. The fields stay in the stored shape so old configs parse.
+ */
+const withoutChatAndVoiceLimits = (limits: SubscriptionLimits): SubscriptionLimits => ({
+  free: { ...limits.free, chatMessagesPerDay: null, voiceMinutesPerDay: null },
+  pro: { ...limits.pro, chatMessagesPerDay: null, voiceMinutesPerDay: null },
+});
+
 export function parseSubscriptionConfig(raw: unknown): SubscriptionConfig {
   const data = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const limits = SubscriptionLimitsSchema.safeParse(data.limits);
   const products = ProductDisplaySettingsSchema.safeParse(data.products);
   const updatedAt = data.updatedAt as { toMillis?: () => number } | number | undefined;
   return {
-    limits: limits.success ? limits.data : DEFAULT_SUBSCRIPTION_CONFIG.limits,
+    limits: withoutChatAndVoiceLimits(limits.success ? limits.data : DEFAULT_SUBSCRIPTION_CONFIG.limits),
     products: products.success ? products.data : DEFAULT_SUBSCRIPTION_CONFIG.products,
     updatedAt: typeof updatedAt === "number" ? updatedAt : updatedAt?.toMillis?.() ?? null,
     updatedBy: typeof data.updatedBy === "string" ? data.updatedBy : null,

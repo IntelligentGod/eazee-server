@@ -96,7 +96,8 @@ test("status reports the plan, limits and today's usage, creating the user recor
     const body = await (await request("GET", "/subscriptions/status")).json();
     assert.equal(body.subscription.isPro, false);
     assert.equal(body.subscription.state, "none");
-    assert.equal(body.planLimits.chatMessagesPerDay, 5);
+    assert.equal(body.planLimits.chatMessagesPerDay, null, "AI chat is unlimited on every plan");
+    assert.equal(body.planLimits.guidance.goalGuidance, 0);
     assert.equal(body.limits.pro.chatMessagesPerDay, null);
     assert.equal(body.usage.aiActions, 1);
     assert.equal(body.products[YEARLY].badge, "Best value");

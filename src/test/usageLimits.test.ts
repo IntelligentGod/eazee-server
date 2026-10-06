@@ -4,7 +4,6 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import express from "express";
 import {
-  aiActionsExhaustedMessage,
   createAiUsageLimitMiddleware,
   createGuidanceLimitMiddleware,
   createUsageRouter,
@@ -57,16 +56,14 @@ test("the usage day follows the user's time zone", () => {
   assert.equal(getUsageDay(undefined, now), "2026-10-01");
 });
 
-test("free users get five AI actions a day, then a clear refusal", async () => {
-  const { server, post } = await startApp();
+test("AI chat is unlimited on every plan, and still counted", async () => {
+  const { server, post, store } = await startApp();
   try {
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 12; index += 1) {
       assert.equal((await post("/ai/route")).status, 200);
     }
-    const refused = await post("/ai/route");
-    assert.equal(refused.status, 403);
-    assert.deepEqual(await refused.json(), { error: aiActionsExhaustedMessage(5, false), code: "AI_ACTIONS_EXHAUSTED" });
-    assert.equal((await post("/ai/tools/result")).status, 200, "tool results finish an already-charged turn");
+    assert.equal((await store.get("free-user", getUsageDay("America/New_York"))).aiActions, 12, "use is still recorded for the admin");
+    assert.equal((await post("/ai/tools/result")).status, 200);
   } finally {
     server.close();
   }
@@ -107,17 +104,12 @@ test("Pro and the sandbox account are unlimited by default, and a disabled switc
   }
 });
 
-test("voice tokens stop once reported voice use reaches two minutes", async () => {
+test("voice input is unlimited on every plan", async () => {
   const { server, post } = await startApp();
   try {
+    assert.equal((await post("/usage/voice", {}, { seconds: 120 })).status, 200);
+    assert.equal((await post("/usage/voice", {}, { seconds: 120 })).status, 200);
     assert.equal((await post("/deepgram/token")).status, 200);
-    assert.equal((await post("/usage/voice", {}, { seconds: 90 })).status, 200);
-    assert.equal((await post("/deepgram/token")).status, 200);
-    assert.equal((await post("/usage/voice", {}, { seconds: 30 })).status, 200);
-
-    const refused = await post("/deepgram/token");
-    assert.equal(refused.status, 403);
-    assert.equal((await refused.json()).code, "VOICE_EXHAUSTED");
     assert.equal((await post("/usage/voice", {}, { seconds: -5 })).status, 400);
   } finally {
     server.close();
@@ -132,42 +124,16 @@ const withLimits = (free: Partial<typeof DEFAULT_SUBSCRIPTION_CONFIG.limits.free
   },
 });
 
-test("chat and voice limits come from config/subscription, for free and Pro", async () => {
+test("an old saved chat or voice limit is ignored", async () => {
   const free = await startApp({ storedConfig: withLimits({ chatMessagesPerDay: 2, voiceMinutesPerDay: 1 }) });
-  const pro = await startApp({ user: PRO_USER, storedConfig: withLimits({}, { chatMessagesPerDay: 3 }) });
   try {
-    assert.equal((await free.post("/ai/route")).status, 200);
-    assert.equal((await free.post("/ai/route")).status, 200);
-    const refused = await free.post("/ai/route");
-    assert.equal(refused.status, 403);
-    assert.equal((await refused.json()).error, aiActionsExhaustedMessage(2, false));
-
-    await free.post("/usage/voice", {}, { seconds: 60 });
-    assert.equal((await free.post("/deepgram/token")).status, 403, "one minute is the configured voice limit");
-
-    for (let index = 0; index < 3; index += 1) {
-      assert.equal((await pro.post("/ai/route")).status, 200);
+    for (let index = 0; index < 4; index += 1) {
+      assert.equal((await free.post("/ai/route")).status, 200);
     }
-    const proRefused = await pro.post("/ai/route");
-    assert.equal(proRefused.status, 403);
-    assert.equal((await proRefused.json()).error, aiActionsExhaustedMessage(3, true));
+    await free.post("/usage/voice", {}, { seconds: 120 });
+    assert.equal((await free.post("/deepgram/token")).status, 200);
   } finally {
     free.server.close();
-    pro.server.close();
-  }
-});
-
-test("an admin's new limit is enforced once the config is saved", async () => {
-  const { server, post, config } = await startApp();
-  try {
-    for (let index = 0; index < 5; index += 1) await post("/ai/route");
-    assert.equal((await post("/ai/route")).status, 403);
-    await config.update(withLimits({ chatMessagesPerDay: 7 }), "admin@eazee.ai");
-    assert.equal((await post("/ai/route")).status, 200);
-    assert.equal((await post("/ai/route")).status, 200);
-    assert.equal((await post("/ai/route")).status, 403);
-  } finally {
-    server.close();
   }
 });
 
