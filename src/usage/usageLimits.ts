@@ -58,6 +58,19 @@ export const GUIDANCE_PATHS: Record<string, { feature: GuidanceFeature; counter:
 
 export const getGuidancePath = (path: string) => GUIDANCE_PATHS[path.replace(/\/+$/, "")] ?? null;
 
+/**
+ * The app walkthrough's demo task and goal (TUTORIAL_DEMO_TODO_TITLE and
+ * TUTORIAL_DEMO_GOAL_TITLE in the app). Guidance on exactly these works on every
+ * plan and is not counted, so a Free user can finish the tutorial.
+ */
+export const TUTORIAL_DEMO_TITLES = ["pack for a weekend trip", "learn basic guitar"] as const;
+
+export const isTutorialDemoRequest = (body: unknown) => {
+  const record = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const title = typeof record.title === "string" ? record.title : typeof record.goalTitle === "string" ? record.goalTitle : "";
+  return (TUTORIAL_DEMO_TITLES as readonly string[]).includes(title.trim().toLowerCase());
+};
+
 /** Requests the app sends as free follow-ups; see FREE_DAILY_UNCHARGED_REQUESTS. */
 const UNCHARGED_FEATURES = new Set(["aiChatTitle", "aiChatSummary", "aiChatToolResult"]);
 /** Finishing a turn that was already charged, or limited another way (home suggestions by days). */
@@ -155,6 +168,7 @@ export function createGuidanceLimitMiddleware(options: UsageLimitOptions): Reque
 
     const caller = await authenticateMeteredUser(req, res, options);
     if (!caller) return;
+    if (isTutorialDemoRequest(req.body)) return next();
 
     try {
       const limit = getPlanLimits(await options.config.get(), caller.isPro).guidance[guidance.feature];

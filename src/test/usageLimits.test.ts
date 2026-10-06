@@ -220,3 +220,21 @@ test("Pro guidance is unlimited by default and can be capped", async () => {
     capped.server.close();
   }
 });
+
+test("free users get guidance on the tutorial's demo task and goal only", async () => {
+  const { server, post, store } = await startApp();
+  try {
+    assert.equal((await post("/ai/task-guidance", {}, { title: "Pack for a weekend trip" })).status, 200);
+    assert.equal((await post("/ai/goal-guidance", {}, { goalTitle: "Learn basic guitar" })).status, 200);
+    assert.equal((await post("/ai/skill/videos", {}, { title: " learn BASIC guitar " })).status, 200);
+
+    const other = await post("/ai/goal-guidance", {}, { goalTitle: "Learn piano" });
+    assert.equal(other.status, 403);
+    assert.equal((await other.json()).code, "PRO_REQUIRED");
+
+    const usage = await store.get("free-user", getUsageDay("America/New_York"));
+    assert.equal(usage.guidanceGoal, 0, "demo guidance is not counted");
+  } finally {
+    server.close();
+  }
+});
