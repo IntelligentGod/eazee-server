@@ -141,7 +141,7 @@ export const PlanMyWeekParameters = {
   properties: {
     weekGoal: {
       type: "string",
-      description: "The goal this week is planned around, as a short title (e.g. 'Study four languages'). Always include it; the app saves it as a This Week goal if it is new.",
+      description: "The week's focus as a short title (e.g. 'Study four languages'). Shown to the user only; nothing is saved from it.",
     },
     days: {
       type: "array",
@@ -155,12 +155,12 @@ export const PlanMyWeekParameters = {
           },
           mainGoal: {
             type: "string",
-            description: "The day's main goal in a few words, such as 'Record pronunciation baseline'.",
+            description: "The day's main focus in a few words, such as 'Record pronunciation baseline'.",
           },
           items: {
             ...PlanMyDayParameters.properties.items,
             maxItems: 5,
-            description: "The day's timeline: at most 5 items, each with a start time and duration. The first item is the main goal step. Short titles only; never details.",
+            description: "The day's schedule: at most 5 time blocks, each with a start time and duration. They are saved as calendar events, never as tasks. Short titles only; never details.",
           },
         },
         required: ["date", "mainGoal"],
@@ -184,7 +184,7 @@ export const overviewTools: ToolDef[] = [
   {
     name: "plan_my_week",
     description:
-      "Draft a plan for several days at once, such as the rest of the week in Fix my life. Each day has a short mainGoal and a timeline of at most 5 timed items (the first is the main goal step), following the same item rules as plan_my_day, with no details. The client shows one card per day. Use this instead of calling plan_my_day once per day.",
+      "Draft a weekly schedule for several days at once, such as the rest of the week in Fix my life. It schedules what the user already has (tasks, goal steps) as calendar time blocks: each day has a short mainGoal and at most 5 timed blocks, around the events already on that day, with no details. It never creates tasks or goals. The client shows one card per day; saving a day adds its blocks to the calendar, optionally repeating every week. Use this instead of calling plan_my_day once per day.",
     mode: "client",
     schema: PlanMyWeekSchema,
     parameters: PlanMyWeekParameters,
