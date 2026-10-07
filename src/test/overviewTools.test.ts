@@ -100,12 +100,41 @@ test("plan_my_week takes a main goal and a timeline of up to 5 items per day", (
   assert.equal(validation.ok, true);
   if (validation.ok) assert.equal(validation.data.days[0].items?.length, 5);
 
-  assert.equal(validateToolCall("plan_my_week", { days: [day("2026-10-05", 6)] }).ok, false, "at most 5 items a day");
-  assert.equal(validateToolCall("plan_my_week", { days: [{ date: "2026-10-02" }] }).ok, false);
+  const trimmed = validateToolCall("plan_my_week", { days: [day("2026-10-05", 6)] });
+  assert.equal(trimmed.ok && trimmed.data.days[0].items?.length, 5, "a sixth item is dropped, not the week");
+  assert.equal(validateToolCall("plan_my_week", { days: [{ mainGoal: "No date" }] }).ok, false);
   assert.equal(validateToolCall("plan_my_week", { days: [] }).ok, false);
 
   const tool = getOpenAIToolDefsByNames(["plan_my_week"])[0] as any;
   assert.equal(tool?.function?.parameters?.properties?.days?.items?.properties?.items?.maxItems, 5);
+});
+
+test("plan_my_week tidies the model's small slips instead of refusing the week", () => {
+  const validation = validateToolCall("plan_my_week", {
+    weekGoal: null,
+    days: [
+      {
+        date: "2026-10-05",
+        mainGoal: "",
+        items: [
+          { text: "Stretch", type: "event", durationMinutes: 10, timeSource: "model", daypart: null, start: "2026-10-05T08:00:00+08:00" },
+          { text: "", durationMinutes: 30 },
+          { text: "Deep work", durationMinutes: 600, priority: "urgent" },
+        ],
+      },
+      { date: "2026-10-06", mainGoal: "Rest", items: [] },
+    ],
+  });
+  assert.equal(validation.ok, true);
+  if (!validation.ok) return;
+  const [monday, tuesday] = validation.data.days;
+  assert.equal(validation.data.weekGoal, undefined);
+  assert.equal(monday.mainGoal, "Stretch", "a missing focus falls back to the first block");
+  assert.deepEqual(monday.items?.map((item: { text: string; durationMinutes?: number; timeSource?: string; priority?: string }) => [item.text, item.durationMinutes, item.timeSource, item.priority]), [
+    ["Stretch", 15, undefined, undefined],
+    ["Deep work", 480, undefined, undefined],
+  ]);
+  assert.equal(tuesday.items, undefined, "an empty day is kept, without items");
 });
 
 test("plan_my_week accepts the week's goal", () => {

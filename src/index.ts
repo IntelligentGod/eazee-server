@@ -2326,6 +2326,7 @@ function validateToolCalls(
 
     const validation = validateToolCall(name, parsedArgs);
     if (!validation.ok) {
+      console.warn(`[tools] ${name}: ${validation.error}`, JSON.stringify("details" in validation ? validation.details : undefined));
       errors.push({ callId, name, error: validation.error });
       continue;
     }

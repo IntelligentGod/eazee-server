@@ -26,8 +26,58 @@ export const PlanMyDaySchema = z.object({
   ).min(1),
 });
 
+const PLAN_ITEM_ENUMS: Record<string, readonly string[]> = {
+  type: ["task", "event", "buffer"],
+  timeSource: ["user", "ai", "none"],
+  daypart: ["morning", "afternoon", "evening", "night"],
+  priority: ["low", "medium", "high"],
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+/** Drops the fields of one week item the model got wrong, so one bad field doesn't lose the whole week. */
+function tidyWeekItem(value: unknown) {
+  if (!isRecord(value)) return null;
+  const item: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(value)) {
+    if (field === null || field === undefined) continue;
+    if (key in PLAN_ITEM_ENUMS && !PLAN_ITEM_ENUMS[key].includes(String(field))) continue;
+    item[key] = field;
+  }
+  if (typeof item.text !== "string" || !item.text.trim()) return null;
+  if (typeof item.durationMinutes === "number" && Number.isFinite(item.durationMinutes)) {
+    item.durationMinutes = Math.min(480, Math.max(15, Math.round(item.durationMinutes)));
+  } else {
+    delete item.durationMinutes;
+  }
+  if (typeof item.order !== "number") delete item.order;
+  if (typeof item.hasDueTime !== "boolean") delete item.hasDueTime;
+  for (const key of ["start", "end", "dueDate", "location", "details"]) {
+    if (key in item && typeof item[key] !== "string") delete item[key];
+  }
+  return item;
+}
+
+/**
+ * The model often sends small slips in a week plan: a null field, a 10-minute block, a
+ * sixth item, a missing main focus. Tidy those instead of refusing the whole week.
+ */
+function tidyPlanMyWeekArgs(value: unknown) {
+  if (!isRecord(value) || !Array.isArray(value.days)) return value;
+  const weekGoal = typeof value.weekGoal === "string" && value.weekGoal.trim() ? value.weekGoal.trim() : undefined;
+  const days = value.days.filter(isRecord).slice(0, 7).map((day) => {
+    const items = (Array.isArray(day.items) ? day.items : []).map(tidyWeekItem).filter(Boolean).slice(0, 5);
+    const mainGoal = typeof day.mainGoal === "string" && day.mainGoal.trim()
+      ? day.mainGoal.trim()
+      : String((items[0] as { text?: string } | undefined)?.text ?? "A lighter day").trim();
+    return { date: day.date, mainGoal, ...(items.length ? { items } : {}) };
+  });
+  return { ...(weekGoal ? { weekGoal } : {}), days };
+}
+
 /** Fix my life drafts every remaining day of the week in one call; a client tool call ends the model's turn. */
-export const PlanMyWeekSchema = z.object({
+export const PlanMyWeekSchema = z.preprocess(tidyPlanMyWeekArgs, z.object({
   weekGoal: z.string().min(1).optional(),
   days: z.array(
     z.object({
@@ -36,7 +86,7 @@ export const PlanMyWeekSchema = z.object({
       items: PlanMyDaySchema.shape.items.max(5).optional(),
     })
   ).min(1).max(7),
-});
+}));
 
 export const SaveDayPlanSchema = z.object({});
 
