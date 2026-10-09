@@ -32,6 +32,7 @@ export function createAppCheckMiddleware(options: {
 
     const token = (req.header("x-firebase-appcheck") || "").trim();
     if (!token) {
+      console.warn(`[app-check] ${req.method} ${req.originalUrl}: no App Check token`);
       return res.status(401).json({ error: "App verification required" });
     }
 
@@ -43,10 +44,12 @@ export function createAppCheckMiddleware(options: {
     try {
       const verified = await verifyToken(token);
       if (allowedAppIds.size > 0 && !allowedAppIds.has(verified.appId)) {
+        console.warn(`[app-check] ${req.method} ${req.originalUrl}: app ${verified.appId} is not in APP_CHECK_ALLOWED_APP_IDS`);
         return res.status(401).json({ error: "App verification required" });
       }
       return next();
-    } catch {
+    } catch (error) {
+      console.warn(`[app-check] ${req.method} ${req.originalUrl}: token rejected:`, (error as Error)?.message || error);
       return res.status(401).json({ error: "App verification required" });
     }
   };

@@ -14,6 +14,7 @@ import { createFunctionRouter } from "./functionRouter";
 import { executeWebSearchTool } from "./tools/webSearch";
 import { createAiAuthMiddleware } from "./auth/ai";
 import { createAppCheckMiddleware } from "./auth/appCheck";
+import { createFirestoreFirstChatAnalyticsStore, createFirstChatAnalyticsRouter, createMemoryFirstChatAnalyticsStore } from "./analytics/firstChat";
 import { isFirebaseAuthenticationError, verifyFirebaseRequest, type AuthenticatedUser } from "./auth/firebase";
 import { createDeepgramRouter } from "./deepgram";
 import { createAppleNotificationsHandler, createSubscriptionsRouter } from "./subscriptions/router";
@@ -2431,6 +2432,15 @@ app.use(
 );
 
 app.use("/usage", appCheckMiddleware, createUsageRouter(usageLimitOptions));
+
+// Onboarding counters only (no chat text); in memory when Firestore enforcement is off.
+app.use(
+  "/analytics",
+  appCheckMiddleware,
+  createFirstChatAnalyticsRouter({
+    store: config.subscriptionEnforcement ? createFirestoreFirstChatAnalyticsStore() : createMemoryFirstChatAnalyticsStore(),
+  })
+);
 
 // Apple calls this without App Check or a Firebase token; it verifies Apple's signature instead.
 app.post(
