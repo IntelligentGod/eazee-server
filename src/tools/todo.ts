@@ -12,7 +12,7 @@ export type ToolDef = {
 
 const TodoRecurrenceSchema = z.object({
   interval: z.number().int().min(1).max(99),
-  unit: z.enum(["day", "week", "month"]),
+  unit: z.enum(["day", "week", "month", "weekday"]),
 });
 
 const TodoRecurrenceParameters = {
@@ -20,7 +20,7 @@ const TodoRecurrenceParameters = {
   description: "Repeat rule for Personal basic todos only. Use { interval: 1, unit: 'day' } for daily/every day, { interval: 1, unit: 'week' } for weekly, { interval: 1, unit: 'month' } for monthly, or every N days/weeks/months with the matching interval and unit. Do not use for Goals or Wishlist.",
   properties: {
     interval: { type: "number", minimum: 1, maximum: 99 },
-    unit: { type: "string", enum: ["day", "week", "month"] },
+    unit: { type: "string", enum: ["day", "week", "month", "weekday"] },
   },
   required: ["interval", "unit"],
   additionalProperties: false,
@@ -284,7 +284,7 @@ export const todoTools: ToolDef[] = [
   },
   {
     name: "todo_create_many",
-    description: "Create one or more independent todos. Use this for add/create task requests where each item should be a separate todo. Do not use this when the user asks to save one task with multiple steps; use todo_create_with_steps instead. For explicit purchase intent such as buy, order, purchase, want to buy, or want to order, create the todo in the Wishlist workspace and set text to only the cleaned item name. Remove leading intent wording and simple articles like a, an, or the. Preserve meaningful product names, model names, numbers, and versions. Use YYYY-MM-DD for day-level due dates. When a todo has an explicit time, use a full ISO 8601 dueDate with timezone offset and set hasDueTime true. For recurring Personal todos, set recurrence to { interval, unit } where unit is day, week, or month. Map daily/every day to { interval: 1, unit: 'day' }, weekly to { interval: 1, unit: 'week' }, monthly to { interval: 1, unit: 'month' }, and every N days/weeks/months to the matching interval/unit. Do not use recurrence for Goals or Wishlist. Do not use calendar tools for a task just because it has a time. If the user says task or todo, keep it as a todo.",
+    description: "Create one or more independent todos. Use this for add/create task requests where each item should be a separate todo. Do not use this when the user asks to save one task with multiple steps; use todo_create_with_steps instead. For explicit purchase intent such as buy, order, purchase, want to buy, or want to order, create the todo in the Wishlist workspace and set text to only the cleaned item name. Remove leading intent wording and simple articles like a, an, or the. Preserve meaningful product names, model names, numbers, and versions. Use YYYY-MM-DD for day-level due dates. When a todo has an explicit time, use a full ISO 8601 dueDate with timezone offset and set hasDueTime true. For recurring Personal todos, set recurrence to { interval, unit } where unit is day, week, month, or weekday. Map daily/every day to { interval: 1, unit: 'day' }, weekly to { interval: 1, unit: 'week' }, weekdays/every weekday/Monday to Friday to { interval: 1, unit: 'weekday' }, monthly to { interval: 1, unit: 'month' }, and every N days/weeks/months to the matching interval/unit. Do not use recurrence for Goals or Wishlist. Do not use calendar tools for a task just because it has a time. If the user says task or todo, keep it as a todo.",
     mode: "client",
     schema: TodoCreateManySchema,
     parameters: TodoCreateManyParameters,
@@ -305,7 +305,7 @@ export const todoTools: ToolDef[] = [
   },
   {
     name: "todo_edit_many",
-    description: "Edit one or more todos by id or oldText. Update only the fields that should change. Use YYYY-MM-DD for day-level due dates, or a full ISO 8601 dueDate with timezone offset plus hasDueTime true for timed todos. Preserve a todo's known time unless the user explicitly changes it. For recurring Personal todos, set recurrence to { interval, unit } where unit is day, week, or month; set recurrence null only when the user explicitly asks to stop repeating. If the user wants something to be a task or todo, keep it in todos and do not recreate it as a calendar event.",
+    description: "Edit one or more todos by id or oldText. Update only the fields that should change. Use YYYY-MM-DD for day-level due dates, or a full ISO 8601 dueDate with timezone offset plus hasDueTime true for timed todos. Preserve a todo's known time unless the user explicitly changes it. For recurring Personal todos, set recurrence to { interval, unit } where unit is day, week, month, or weekday (Monday to Friday); set recurrence null only when the user explicitly asks to stop repeating. If the user wants something to be a task or todo, keep it in todos and do not recreate it as a calendar event.",
     mode: "client",
     schema: TodoEditManySchema,
     parameters: TodoEditManyParameters,

@@ -83,7 +83,7 @@ test("todo tools accept recurrence for create and edit", () => {
 
   const createTool = getOpenAIToolDefsByNames(["todo_create_many"])[0] as any;
   const recurrence = createTool?.function?.parameters?.properties?.items?.items?.properties?.recurrence;
-  assert.deepEqual(recurrence?.properties?.unit?.enum, ["day", "week", "month"]);
+  assert.deepEqual(recurrence?.properties?.unit?.enum, ["day", "week", "month", "weekday"]);
 });
 
 test("full chat registry exposes goal and guidance tools", () => {
