@@ -14,6 +14,7 @@ import { createFunctionRouter } from "./functionRouter";
 import { executeWebSearchTool } from "./tools/webSearch";
 import { createAiAuthMiddleware } from "./auth/ai";
 import { createAppCheckMiddleware } from "./auth/appCheck";
+import { getAppVersionConfig } from "./appVersion";
 import { createFirestoreFirstChatAnalyticsStore, createFirstChatAnalyticsRouter, createMemoryFirstChatAnalyticsStore } from "./analytics/firstChat";
 import { isFirebaseAuthenticationError, verifyFirebaseRequest, type AuthenticatedUser } from "./auth/firebase";
 import { createDeepgramRouter } from "./deepgram";
@@ -2411,6 +2412,12 @@ app.use((req, _res, next) => {
 
 app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true, status: "healthy" });
+});
+
+// Public, like /health: the app asks on launch whether it must or may update.
+app.get("/app/version-config", (_req, res) => {
+  res.set("Cache-Control", "public, max-age=300");
+  res.status(200).json(getAppVersionConfig());
 });
 
 // Usage is only metered in Firestore once enforcement is on. Subscription records
