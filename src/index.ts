@@ -7,7 +7,7 @@ import { openaiChat, openaiChatStream, type ChatMessage, type OpenAIToolCall } f
 import { AI_MODELS, getRouteModel } from "./ai/models";
 import { buildContext } from "./ai/context";
 import { getOpenAIToolDefs, getToolByName, validateToolCall } from "./tools/registry";
-import { getAllowedToolNamesForSurface, getToolDefsForSurface, type AssistantSurface } from "./tools/surfaces";
+import { filterToolsForClientCapabilities, getAllowedToolNamesForSurface, getToolDefsForSurface, type AssistantSurface } from "./tools/surfaces";
 import { APP_SCREEN_DESTINATIONS } from "./tools/appNavigation";
 import { withCompactCalendarCreateContract } from "./tools/calendar";
 import { createFunctionRouter } from "./functionRouter";
@@ -2803,6 +2803,8 @@ const ChatRouteSchema = ChatBodySchema.extend({
   assistantSurface: z.enum(["chat", "todo", "calendar", "home"]).optional(),
   assistantMode: z.enum(["chat", "compact"]).optional(),
   aiPersonalization: AiPersonalizationRequestSchema,
+  /** App-run tools this build supports (see filterToolsForClientCapabilities). */
+  clientCapabilities: z.array(z.string().max(60)).max(30).optional(),
 });
 app.post("/ai/route", async (req, res) => {
   const parse = ChatRouteSchema.safeParse(req.body);
@@ -2818,13 +2820,15 @@ app.post("/ai/route", async (req, res) => {
     assistantSurface,
     assistantMode,
     aiPersonalization,
+    clientCapabilities,
   } = parse.data as any;
   try {
     const resolvedModel = getRouteModel(assistantMode);
     const isCompactCalendarRoute = assistantMode === "compact" && assistantSurface === "calendar";
-    const requestedTools = Array.isArray(tools) && tools.length > 0
-      ? tools
-      : getToolDefsForSurface(assistantSurface);
+    const requestedTools = filterToolsForClientCapabilities(
+      Array.isArray(tools) && tools.length > 0 ? tools : getToolDefsForSurface(assistantSurface),
+      clientCapabilities
+    );
     const finalTools = isCompactCalendarRoute
       ? withCompactCalendarCreateContract(requestedTools)
       : requestedTools;

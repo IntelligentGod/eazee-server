@@ -41,6 +41,23 @@ export const SURFACE_TOOL_NAMES: Record<AssistantSurface, string[] | null> = {
   ],
 };
 
+/**
+ * Tools that run in the app and only exist in newer app builds. Older builds don't list
+ * them in clientCapabilities, so they are never offered a tool they can't run.
+ */
+const CAPABILITY_GATED_TOOL_NAMES = new Set(["calendar_create_many"]);
+
+export function filterToolsForClientCapabilities<T extends { function?: { name?: string } }>(
+  tools: T[],
+  clientCapabilities?: string[] | null
+) {
+  const capabilities = new Set(clientCapabilities || []);
+  return tools.filter((tool) => {
+    const name = tool?.function?.name || "";
+    return !CAPABILITY_GATED_TOOL_NAMES.has(name) || capabilities.has(name);
+  });
+}
+
 export function getAllowedToolNamesForSurface(surface?: AssistantSurface) {
   if (!surface || surface === "chat") {
     return null;

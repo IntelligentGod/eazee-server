@@ -29,6 +29,19 @@ export const CalendarCreateSchema = z.object({
   attendees: z.array(z.string().min(3)).optional(),
 });
 
+export const CalendarCreateManyEventSchema = z.object({
+  title: z.string().min(1),
+  start: z.string().min(4), // ISO 8601 with tz
+  end: z.string().min(4),   // ISO 8601 with tz
+  details: z.string().max(4000).optional(),
+  location: z.string().optional(),
+  repeatWeekly: z.boolean().optional(),
+});
+
+export const CalendarCreateManySchema = z.object({
+  events: z.array(CalendarCreateManyEventSchema).min(1).max(20),
+});
+
 export const CalendarUpdateSchema = z.object({
   id: z.string().min(1),
   source: z.enum(["google", "local"]).optional(),
@@ -167,6 +180,32 @@ export function withCompactCalendarCreateContract<T extends OpenAIToolDefinition
   });
 }
 
+export const CalendarCreateManyParameters = {
+  type: "object",
+  properties: {
+    events: {
+      type: "array",
+      minItems: 1,
+      maxItems: 20,
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string", minLength: 1 },
+          start: { type: "string", minLength: 4, description: "Full ISO 8601 datetime with timezone offset, for the first time it happens." },
+          end: { type: "string", minLength: 4, description: "Full ISO 8601 datetime with timezone offset." },
+          details: { type: "string", maxLength: 4000 },
+          location: { type: "string" },
+          repeatWeekly: { type: "boolean", description: "True when this is a regular weekly slot (work shifts, classes, a weekly practice) or the user asked for it every week. The event then repeats on the same weekday and time every week." },
+        },
+        required: ["title", "start", "end"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["events"],
+  additionalProperties: false,
+};
+
 export const CalendarUpdateParameters = {
   type: "object",
   properties: {
@@ -224,10 +263,17 @@ export const calendarTools: ToolDef[] = [
   },
   {
     name: "calendar_create",
-    description: "Create a new calendar event only after the user supplied or explicitly implied both start and end times. Ask for a missing time instead of inventing midnight, an end time, or a default duration. Never create a new event in the past. Use this only for items that should truly live on the calendar, such as meetings, appointments, interviews, calls, lunches, or other events. Do not use this for todos, even when a todo has an explicit time. Start and end must be full ISO 8601 datetimes with timezone offsets.",
+    description: "Create ONE new calendar event (for two or more, use calendar_create_many) only after the user supplied or explicitly implied both start and end times. Ask for a missing time instead of inventing midnight, an end time, or a default duration. Never create a new event in the past. Use this only for items that should truly live on the calendar, such as meetings, appointments, interviews, calls, lunches, or other events. Do not use this for todos, even when a todo has an explicit time. Start and end must be full ISO 8601 datetimes with timezone offsets.",
     mode: "client",
     schema: CalendarCreateSchema,
     parameters: CalendarCreateParameters,
+  },
+  {
+    name: "calendar_create_many",
+    description: "Create several calendar events in one call: a work roster, shifts, a class timetable, or any list of events. Always include every event the user listed in this single call; never add just the first one. For a regular schedule (shifts, classes, 'every week', 'my usual week'), set repeatWeekly true on each event so it repeats every week; if it is unclear whether the schedule repeats, ask 'Every week, or just this once?' before calling. Start each event on its first upcoming date. Start and end must be full ISO 8601 datetimes with timezone offsets. Use only for true calendar events, not todos.",
+    mode: "client",
+    schema: CalendarCreateManySchema,
+    parameters: CalendarCreateManyParameters,
   },
   {
     name: "calendar_update",
