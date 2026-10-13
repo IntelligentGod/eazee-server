@@ -1098,9 +1098,20 @@ function normalizeTranscriptSegments(raw: any): TranscriptSegment[] {
     .filter((segment: TranscriptSegment) => segment.text.length > 0);
 }
 
+/** Shown to the user when transcripts can't be fetched at all; the real cause is logged. */
+const TRANSCRIPT_SERVICE_UNAVAILABLE_MESSAGE =
+  "Video steps aren't available right now. Please try again later, or use AI Guidance instead.";
+
+class TranscriptServiceUnavailableError extends Error {
+  constructor() {
+    super(TRANSCRIPT_SERVICE_UNAVAILABLE_MESSAGE);
+  }
+}
+
 async function fetchSupadataTranscriptPayload(url: string) {
   if (!config.supadataApiKey) {
-    throw new Error("SUPADATA_API_KEY is not configured.");
+    console.error("[transcript] SUPADATA_API_KEY is not configured on this server.");
+    throw new TranscriptServiceUnavailableError();
   }
 
   const response = await fetch(url, {
@@ -3515,6 +3526,7 @@ app.post("/ai/recipe/generate", async (req, res) => {
     const message = err?.message || "Recipe generation failed";
     console.error(`[recipe/generate] error:`, message);
     const status =
+      err instanceof TranscriptServiceUnavailableError ? 503 :
       /transcript|caption/i.test(message) ? 424 :
       err instanceof InvalidGuideResponseError ? 502 :
       500;
@@ -3609,6 +3621,7 @@ app.post("/ai/skill/generate", async (req, res) => {
     const message = err?.message || "Skill guide generation failed";
     console.error(`[skill/generate] error:`, message);
     const status =
+      err instanceof TranscriptServiceUnavailableError ? 503 :
       /transcript|caption/i.test(message) ? 424 :
       err instanceof InvalidGuideResponseError ? 502 :
       500;
