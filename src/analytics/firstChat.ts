@@ -38,8 +38,49 @@ export const FirstChatEventSchema = z.object({
 
 export type FirstChatEvent = z.infer<typeof FirstChatEventSchema>;
 
+/**
+ * "Get to know me" profile events: counts only, never answers, profile text or scores.
+ * Opening the share sheet is counted as that, not as a confirmed post.
+ */
+export const ABOUT_ME_EVENTS = [
+  "invite_shown",
+  "invite_accepted",
+  "invite_dismissed",
+  "flow_started",
+  "question_skipped",
+  "test_completed",
+  "test_incomplete",
+  "profile_saved",
+  "profile_discarded",
+  "profile_deleted",
+  "card_saved",
+  "share_sheet_opened",
+] as const;
+
+export const AboutMeEventSchema = z.object({
+  event: z.enum(ABOUT_ME_EVENTS),
+  props: z.object({
+    entry: z.enum(["chat", "settings"]).optional(),
+    route: z.enum(["test", "mbti", "big_five", "other", "skip"]).optional(),
+    question: z.enum(["q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8", "q9", "q10", "tipi"]).optional(),
+  }).strict().default({}),
+}).strict();
+
+export type AboutMeEvent = z.infer<typeof AboutMeEventSchema>;
+
 export interface FirstChatAnalyticsStore {
   record(day: string, event: FirstChatEvent): Promise<void>;
+  /** Adds to the "Get to know me" counters, a separate daily document. */
+  recordAboutMe?(day: string, event: AboutMeEvent): Promise<void>;
+}
+
+export function getAboutMeCounterIncrements({ event, props }: AboutMeEvent) {
+  const increments: Record<string, number> = { [event]: 1 };
+  for (const key of ["entry", "route", "question"] as const) {
+    const value = props[key];
+    if (value) increments[`${event}__${key}_${value}`] = 1;
+  }
+  return increments;
 }
 
 /** The counters one event adds to: the event itself, and the event split by each property. */
@@ -56,30 +97,36 @@ export function getFirstChatCounterIncrements({ event, props }: FirstChatEvent) 
 /** One document per day: `analytics/firstChat/days/{YYYY-MM-DD}`, a map of counters. */
 export function createFirestoreFirstChatAnalyticsStore(): FirstChatAnalyticsStore {
   getFirebaseAuth(); // initializes the shared firebase-admin app
-  const days = getFirestore().collection("analytics").doc("firstChat").collection("days");
+  const analytics = getFirestore().collection("analytics");
+  const add = async (scope: string, day: string, increments: Record<string, number>) => {
+    const counts = Object.fromEntries(Object.entries(increments).map(([key, amount]) => [key, FieldValue.increment(amount)]));
+    await analytics.doc(scope).collection("days").doc(day).set({ day, counts, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  };
   return {
-    async record(day, event) {
-      const counts = Object.fromEntries(
-        Object.entries(getFirstChatCounterIncrements(event)).map(([key, amount]) => [key, FieldValue.increment(amount)])
-      );
-      await days.doc(day).set({ day, counts, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    },
+    record: (day, event) => add("firstChat", day, getFirstChatCounterIncrements(event)),
+    recordAboutMe: (day, event) => add("aboutMe", day, getAboutMeCounterIncrements(event)),
   };
 }
 
 /** For tests and local runs without Firestore. */
 export function createMemoryFirstChatAnalyticsStore() {
   const days = new Map<string, Record<string, number>>();
+  const aboutMeDays = new Map<string, Record<string, number>>();
+  const add = (target: Map<string, Record<string, number>>, day: string, increments: Record<string, number>) => {
+    const counts = target.get(day) ?? {};
+    for (const [key, amount] of Object.entries(increments)) counts[key] = (counts[key] ?? 0) + amount;
+    target.set(day, counts);
+  };
   return {
     days,
+    aboutMeDays,
     async record(day: string, event: FirstChatEvent) {
-      const counts = days.get(day) ?? {};
-      for (const [key, amount] of Object.entries(getFirstChatCounterIncrements(event))) {
-        counts[key] = (counts[key] ?? 0) + amount;
-      }
-      days.set(day, counts);
+      add(days, day, getFirstChatCounterIncrements(event));
     },
-  } satisfies FirstChatAnalyticsStore & { days: Map<string, Record<string, number>> };
+    async recordAboutMe(day: string, event: AboutMeEvent) {
+      add(aboutMeDays, day, getAboutMeCounterIncrements(event));
+    },
+  } satisfies FirstChatAnalyticsStore & { days: Map<string, Record<string, number>>; aboutMeDays: Map<string, Record<string, number>> };
 }
 
 export function createFirstChatAnalyticsRouter(options: {
@@ -89,14 +136,36 @@ export function createFirstChatAnalyticsRouter(options: {
   const router = express.Router();
   const verifyRequest = options.verifyRequest ?? ((request: Request) => verifyFirebaseRequest(request));
 
-  router.post("/first-chat", async (req, res) => {
+  const isSignedIn = async (req: Request, res: express.Response) => {
     let user: AuthenticatedUser | null;
     try {
       user = await verifyRequest(req);
     } catch (error) {
-      return res.status(isFirebaseAuthenticationError(error) ? 401 : 500).json({ error: "Authentication required" });
+      res.status(isFirebaseAuthenticationError(error) ? 401 : 500).json({ error: "Authentication required" });
+      return false;
     }
-    if (!user) return res.status(401).json({ error: "Authentication required" });
+    if (!user) {
+      res.status(401).json({ error: "Authentication required" });
+      return false;
+    }
+    return true;
+  };
+
+  router.post("/about-me", async (req, res) => {
+    if (!(await isSignedIn(req, res))) return;
+    const parsed = AboutMeEventSchema.safeParse(req.body);
+    if (!parsed.success || !options.store.recordAboutMe) return res.status(400).json({ error: "Invalid event" });
+    try {
+      await options.store.recordAboutMe(getUsageDay(req.header("x-eazee-timezone") || undefined), parsed.data);
+      return res.status(202).json({ ok: true });
+    } catch (error) {
+      console.error("[analytics] could not record an about-me event", error);
+      return res.status(500).json({ error: "Could not record the event" });
+    }
+  });
+
+  router.post("/first-chat", async (req, res) => {
+    if (!(await isSignedIn(req, res))) return;
 
     const parsed = FirstChatEventSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid event" });

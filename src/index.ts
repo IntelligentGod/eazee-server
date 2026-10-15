@@ -16,6 +16,13 @@ import { createAiAuthMiddleware } from "./auth/ai";
 import { createAppCheckMiddleware } from "./auth/appCheck";
 import { getAppVersionConfig } from "./appVersion";
 import { createFirestoreFirstChatAnalyticsStore, createFirstChatAnalyticsRouter, createMemoryFirstChatAnalyticsStore } from "./analytics/firstChat";
+import {
+  AboutMeChatContextSchema,
+  buildAboutMeSystemContent,
+  createAboutMeProfileRouter,
+  createFirestoreAboutMeProfileStore,
+  createMemoryAboutMeProfileStore,
+} from "./profile/aboutMe";
 import { isFirebaseAuthenticationError, verifyFirebaseRequest, type AuthenticatedUser } from "./auth/firebase";
 import { createDeepgramRouter } from "./deepgram";
 import { createAppleNotificationsHandler, createSubscriptionsRouter } from "./subscriptions/router";
@@ -2490,6 +2497,10 @@ app.use(
   })
 );
 
+// The "Get to know me" profile; in memory when Firestore enforcement is off.
+const aboutMeProfileStore = config.subscriptionEnforcement ? createFirestoreAboutMeProfileStore() : createMemoryAboutMeProfileStore();
+app.use("/profile", appCheckMiddleware, createAboutMeProfileRouter({ store: aboutMeProfileStore }));
+
 app.use("/account", appCheckMiddleware);
 
 app.post("/account/deletion-intent", async (req, res) => {
@@ -2561,6 +2572,7 @@ app.delete("/account", async (req, res) => {
 
   try {
     await deleteAuthenticatedAccount(user, parse.data.appleAuthorizationCode, parse.data.recoveryToken);
+    await aboutMeProfileStore.delete(user.uid).catch(() => console.error("[account-delete] profile cleanup failed"));
     return res.status(200).json({ deleted: true });
   } catch (error: any) {
     const message = String(error?.message || "");
@@ -2805,6 +2817,11 @@ const ChatRouteSchema = ChatBodySchema.extend({
   aiPersonalization: AiPersonalizationRequestSchema,
   /** App-run tools this build supports (see filterToolsForClientCapabilities). */
   clientCapabilities: z.array(z.string().max(60)).max(30).optional(),
+  /** The enabled parts of the user's "Get to know me" profile; an invalid one is ignored. */
+  aboutMe: z.unknown().optional().transform((value) => {
+    const parsed = AboutMeChatContextSchema.safeParse(value);
+    return parsed.success ? parsed.data : undefined;
+  }),
 });
 app.post("/ai/route", async (req, res) => {
   const parse = ChatRouteSchema.safeParse(req.body);
@@ -2821,6 +2838,7 @@ app.post("/ai/route", async (req, res) => {
     assistantMode,
     aiPersonalization,
     clientCapabilities,
+    aboutMe,
   } = parse.data as any;
   try {
     const resolvedModel = getRouteModel(assistantMode);
@@ -2848,9 +2866,11 @@ app.post("/ai/route", async (req, res) => {
     let routeMeta: RouteMeta | undefined;
 
     const personalizationMessage = buildAiPersonalizationSystemMessage(aiPersonalization);
+    const aboutMeContent = assistantMode === "compact" ? null : buildAboutMeSystemContent(aboutMe);
     let workingMessages = [
       assistantMode === "compact" ? buildCompactServerSystemMessage(assistantSurface) : buildChatServerSystemMessage(),
       ...(personalizationMessage ? [personalizationMessage] : []),
+      ...(aboutMeContent ? [{ role: "system", content: aboutMeContent } as ChatMessage] : []),
       ...routeMessages,
     ] as ChatMessage[];
     let retriedCalendarCreateContract = false;
