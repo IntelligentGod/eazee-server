@@ -23,6 +23,13 @@ import {
   createFirestoreAboutMeProfileStore,
   createMemoryAboutMeProfileStore,
 } from "./profile/aboutMe";
+import {
+  buildMemoriesSystemContent,
+  ChatMemoriesSchema,
+  createFirestoreMemoryStore,
+  createMemoriesRouter,
+  createMemoryMemoryStore,
+} from "./profile/memories";
 import { isFirebaseAuthenticationError, verifyFirebaseRequest, type AuthenticatedUser } from "./auth/firebase";
 import { createDeepgramRouter } from "./deepgram";
 import { createAppleNotificationsHandler, createSubscriptionsRouter } from "./subscriptions/router";
@@ -2500,6 +2507,9 @@ app.use(
 // The "Get to know me" profile; in memory when Firestore enforcement is off.
 const aboutMeProfileStore = config.subscriptionEnforcement ? createFirestoreAboutMeProfileStore() : createMemoryAboutMeProfileStore();
 app.use("/profile", appCheckMiddleware, createAboutMeProfileRouter({ store: aboutMeProfileStore }));
+// Persistent memory; in memory when Firestore enforcement is off.
+const memoryStore = config.subscriptionEnforcement ? createFirestoreMemoryStore() : createMemoryMemoryStore();
+app.use("/profile", appCheckMiddleware, createMemoriesRouter({ store: memoryStore }));
 
 app.use("/account", appCheckMiddleware);
 
@@ -2573,6 +2583,7 @@ app.delete("/account", async (req, res) => {
   try {
     await deleteAuthenticatedAccount(user, parse.data.appleAuthorizationCode, parse.data.recoveryToken);
     await aboutMeProfileStore.delete(user.uid).catch(() => console.error("[account-delete] profile cleanup failed"));
+    await memoryStore.delete(user.uid).catch(() => console.error("[account-delete] memory cleanup failed"));
     return res.status(200).json({ deleted: true });
   } catch (error: any) {
     const message = String(error?.message || "");
@@ -2822,6 +2833,11 @@ const ChatRouteSchema = ChatBodySchema.extend({
     const parsed = AboutMeChatContextSchema.safeParse(value);
     return parsed.success ? parsed.data : undefined;
   }),
+  /** Persistent memory (text of each saved memory) while it is on; absent when off. */
+  memories: z.unknown().optional().transform((value) => {
+    const parsed = ChatMemoriesSchema.safeParse(value);
+    return parsed.success ? parsed.data : undefined;
+  }),
 });
 app.post("/ai/route", async (req, res) => {
   const parse = ChatRouteSchema.safeParse(req.body);
@@ -2839,6 +2855,7 @@ app.post("/ai/route", async (req, res) => {
     aiPersonalization,
     clientCapabilities,
     aboutMe,
+    memories,
   } = parse.data as any;
   try {
     const resolvedModel = getRouteModel(assistantMode);
@@ -2867,10 +2884,12 @@ app.post("/ai/route", async (req, res) => {
 
     const personalizationMessage = buildAiPersonalizationSystemMessage(aiPersonalization);
     const aboutMeContent = assistantMode === "compact" ? null : buildAboutMeSystemContent(aboutMe);
+    const memoriesContent = assistantMode === "compact" || !memories ? null : buildMemoriesSystemContent(memories);
     let workingMessages = [
       assistantMode === "compact" ? buildCompactServerSystemMessage(assistantSurface) : buildChatServerSystemMessage(),
       ...(personalizationMessage ? [personalizationMessage] : []),
       ...(aboutMeContent ? [{ role: "system", content: aboutMeContent } as ChatMessage] : []),
+      ...(memoriesContent ? [{ role: "system", content: memoriesContent } as ChatMessage] : []),
       ...routeMessages,
     ] as ChatMessage[];
     let retriedCalendarCreateContract = false;
