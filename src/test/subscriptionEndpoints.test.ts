@@ -97,7 +97,9 @@ test("status reports the plan, limits and today's usage, creating the user recor
     assert.equal(body.subscription.isPro, false);
     assert.equal(body.subscription.state, "none");
     assert.equal(body.planLimits.chatMessagesPerDay, null, "AI chat is unlimited on every plan");
-    assert.equal(body.planLimits.guidance.goalGuidance, 0);
+    assert.equal(body.planLimits.guidance.goalGuidance, null, "guidance is unlimited on every plan");
+    assert.equal(body.planLimits.aiActionsPerDay, 8);
+    assert.equal(body.usage.aiItemActions, 0);
     assert.equal(body.limits.pro.chatMessagesPerDay, null);
     assert.equal(body.usage.aiActions, 1);
     assert.equal(body.products[YEARLY].badge, "Best value");

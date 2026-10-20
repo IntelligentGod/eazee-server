@@ -12,6 +12,8 @@ const USAGE_RETENTION_DAYS = 7;
 /** Counters kept per user per day. Guidance counters are named after GUIDANCE_FEATURES. */
 export const USAGE_COUNTERS = [
   "aiActions",
+  /** AI actions as the plans count them: items Eazee created, changed or deleted. */
+  "aiItemActions",
   "unchargedRequests",
   "guidanceGoal",
   "guidanceTask",
@@ -26,6 +28,10 @@ export type DailyUsageEntry = DailyUsage & { day: string };
 export interface UsageStore {
   /** Adds one to `field` unless that would pass `limit` (null: no limit); returns whether it was added. */
   consume(uid: string, day: string, field: UsageCounter, limit: number | null): Promise<boolean>;
+  /** Adds up to `count` to `field` without passing `limit`; returns how many were added. */
+  consumeUpTo(uid: string, day: string, field: UsageCounter, count: number, limit: number | null): Promise<number>;
+  /** Gives back `count` (never below zero), for reserved actions that did not happen. */
+  release(uid: string, day: string, field: UsageCounter, count: number): Promise<void>;
   addVoiceSeconds(uid: string, day: string, seconds: number): Promise<void>;
   get(uid: string, day: string): Promise<DailyUsage>;
   /** Newest first, at most `limit` days (old days expire after USAGE_RETENTION_DAYS). */
@@ -34,6 +40,7 @@ export interface UsageStore {
 
 export const EMPTY_USAGE: DailyUsage = {
   aiActions: 0,
+  aiItemActions: 0,
   voiceSeconds: 0,
   unchargedRequests: 0,
   guidanceGoal: 0,
@@ -70,6 +77,24 @@ export function createFirestoreUsageStore(): UsageStore {
         return true;
       });
     },
+    async consumeUpTo(uid, day, field, count, limit) {
+      const ref = dayDoc(uid, day);
+      return firestore.runTransaction(async (transaction) => {
+        const usage = readUsage((await transaction.get(ref)).data());
+        const granted = limit === null ? count : Math.max(0, Math.min(count, limit - usage[field]));
+        if (granted > 0) {
+          transaction.set(ref, { [field]: usage[field] + granted, day, updatedAt: FieldValue.serverTimestamp(), expireAt: expireAt() }, { merge: true });
+        }
+        return granted;
+      });
+    },
+    async release(uid, day, field, count) {
+      const ref = dayDoc(uid, day);
+      await firestore.runTransaction(async (transaction) => {
+        const usage = readUsage((await transaction.get(ref)).data());
+        transaction.set(ref, { [field]: Math.max(0, usage[field] - count), day, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      });
+    },
     async addVoiceSeconds(uid, day, seconds) {
       await dayDoc(uid, day).set(
         { voiceSeconds: FieldValue.increment(seconds), day, updatedAt: FieldValue.serverTimestamp(), expireAt: expireAt() },
@@ -97,6 +122,16 @@ export function createMemoryUsageStore(): UsageStore {
       if (!isWithinLimit(usage[field], limit)) return false;
       days.set(`${uid}/${day}`, { ...usage, [field]: usage[field] + 1 });
       return true;
+    },
+    async consumeUpTo(uid, day, field, count, limit) {
+      const usage = read(uid, day);
+      const granted = limit === null ? count : Math.max(0, Math.min(count, limit - usage[field]));
+      days.set(`${uid}/${day}`, { ...usage, [field]: usage[field] + granted });
+      return granted;
+    },
+    async release(uid, day, field, count) {
+      const usage = read(uid, day);
+      days.set(`${uid}/${day}`, { ...usage, [field]: Math.max(0, usage[field] - count) });
     },
     async addVoiceSeconds(uid, day, seconds) {
       const usage = read(uid, day);

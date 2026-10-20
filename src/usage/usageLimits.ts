@@ -223,13 +223,61 @@ export function createVoiceUsageLimitMiddleware(options: UsageLimitOptions): Req
 }
 
 const VoiceUsageBodySchema = z.object({ seconds: z.number().positive().max(600) });
+const AiActionsBodySchema = z.object({ count: z.number().int().min(1).max(100) });
+
+export type AiActionsAllowance = { granted: number; used: number; limit: number | null; remaining: number | null };
 
 /**
  * The app reports each recording's length here. Deepgram streams straight from
  * the phone, so the server cannot measure it itself.
  */
-export function createUsageRouter(options: Omit<UsageLimitOptions, "config">) {
+export function createUsageRouter(options: UsageLimitOptions) {
   const router = express.Router();
+
+  /**
+   * AI actions. The app reserves the actions a request needs before Eazee changes anything
+   * (it may get fewer than asked when the day's allowance is nearly used), then releases the
+   * ones that did not happen, so only successful changes count.
+   */
+  const allowance = async (uid: string, day: string, isPro: boolean, granted: number): Promise<AiActionsAllowance> => {
+    const limit = getPlanLimits(await options.config.get(), isPro).aiActionsPerDay ?? null;
+    const used = (await options.store.get(uid, day)).aiItemActions;
+    return { granted, used, limit, remaining: limit === null ? null : Math.max(0, limit - used) };
+  };
+
+  router.post("/ai-actions/reserve", async (req, res) => {
+    const body = AiActionsBodySchema.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: "count must be between 1 and 100" });
+    if (!options.enabled) return res.json({ granted: body.data.count, used: 0, limit: null, remaining: null });
+    const caller = await authenticateMeteredUser(req, res, options);
+    if (!caller) return;
+    try {
+      const day = usageDay(req);
+      const limit = getPlanLimits(await options.config.get(), caller.isPro).aiActionsPerDay ?? null;
+      const granted = await options.store.consumeUpTo(caller.user.uid, day, "aiItemActions", body.data.count, limit);
+      return res.json(await allowance(caller.user.uid, day, caller.isPro, granted));
+    } catch (error) {
+      // A usage-store outage should not stop Eazee from working.
+      console.error("[usage] could not reserve AI actions", error);
+      return res.json({ granted: body.data.count, used: 0, limit: null, remaining: null });
+    }
+  });
+
+  router.post("/ai-actions/release", async (req, res) => {
+    const body = AiActionsBodySchema.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: "count must be between 1 and 100" });
+    if (!options.enabled) return res.json({ granted: 0, used: 0, limit: null, remaining: null });
+    const caller = await authenticateMeteredUser(req, res, options);
+    if (!caller) return;
+    try {
+      const day = usageDay(req);
+      await options.store.release(caller.user.uid, day, "aiItemActions", body.data.count);
+      return res.json(await allowance(caller.user.uid, day, caller.isPro, 0));
+    } catch (error) {
+      console.error("[usage] could not release AI actions", error);
+      return res.status(500).json({ error: "Could not update AI actions" });
+    }
+  });
 
   router.post("/voice", async (req, res) => {
     const verifyRequest = options.verifyRequest ?? ((request: Request) => verifyFirebaseRequest(request));

@@ -15,6 +15,11 @@ const LimitSchema = z.number().int().min(0).max(100_000).nullable();
 const PlanLimitsSchema = z.object({
   chatMessagesPerDay: LimitSchema,
   voiceMinutesPerDay: LimitSchema,
+  /**
+   * AI actions: each item Eazee creates, changes or deletes for the user (see the app's
+   * lib/aiActions.ts). Chatting itself is never counted. Optional so older stored configs parse.
+   */
+  aiActionsPerDay: LimitSchema.optional(),
   guidance: z.object({
     goalGuidance: LimitSchema,
     taskGuidance: LimitSchema,
@@ -49,21 +54,26 @@ export type SubscriptionConfig = {
   updatedBy: string | null;
 };
 
+/** Free AI actions per day (Eazee Pro is unlimited). */
+export const FREE_AI_ACTIONS_PER_DAY = 8;
+
 /**
  * Used until an admin saves `config/subscription`, and whenever it cannot be
- * read. AI chat and voice input are unlimited on every plan; Free gets no
- * guidance, Pro is unlimited.
+ * read. AI chat, voice input and guidance are unlimited on every plan; Free
+ * gets FREE_AI_ACTIONS_PER_DAY AI actions a day, Pro is unlimited.
  */
 export const DEFAULT_SUBSCRIPTION_CONFIG: SubscriptionConfig = {
   limits: {
     free: {
       chatMessagesPerDay: null,
       voiceMinutesPerDay: null,
-      guidance: { goalGuidance: 0, taskGuidance: 0, recipeSkillGuide: 0, guidanceQuestions: 0 },
+      aiActionsPerDay: FREE_AI_ACTIONS_PER_DAY,
+      guidance: { goalGuidance: null, taskGuidance: null, recipeSkillGuide: null, guidanceQuestions: null },
     },
     pro: {
       chatMessagesPerDay: null,
       voiceMinutesPerDay: null,
+      aiActionsPerDay: null,
       guidance: { goalGuidance: null, taskGuidance: null, recipeSkillGuide: null, guidanceQuestions: null },
     },
   },
@@ -80,12 +90,27 @@ export const DEFAULT_SUBSCRIPTION_CONFIG: SubscriptionConfig = {
  * invalid, so one bad field never removes every limit.
  */
 /**
- * AI chat and voice input have no daily limit on any plan; a limit saved before
- * that decision is ignored. The fields stay in the stored shape so old configs parse.
+ * AI chat, voice input and guidance (goal and task guidance, recipe and skill guides,
+ * guidance questions) have no daily limit on any plan; a limit saved before that decision
+ * is ignored. The fields stay in the stored shape so old configs parse. A config saved
+ * before AI actions existed gets the default action allowance.
  */
+const UNLIMITED_GUIDANCE = { goalGuidance: null, taskGuidance: null, recipeSkillGuide: null, guidanceQuestions: null };
 const withoutChatAndVoiceLimits = (limits: SubscriptionLimits): SubscriptionLimits => ({
-  free: { ...limits.free, chatMessagesPerDay: null, voiceMinutesPerDay: null },
-  pro: { ...limits.pro, chatMessagesPerDay: null, voiceMinutesPerDay: null },
+  free: {
+    ...limits.free,
+    chatMessagesPerDay: null,
+    voiceMinutesPerDay: null,
+    guidance: UNLIMITED_GUIDANCE,
+    aiActionsPerDay: limits.free.aiActionsPerDay === undefined ? FREE_AI_ACTIONS_PER_DAY : limits.free.aiActionsPerDay,
+  },
+  pro: {
+    ...limits.pro,
+    chatMessagesPerDay: null,
+    voiceMinutesPerDay: null,
+    guidance: UNLIMITED_GUIDANCE,
+    aiActionsPerDay: limits.pro.aiActionsPerDay ?? null,
+  },
 });
 
 export function parseSubscriptionConfig(raw: unknown): SubscriptionConfig {

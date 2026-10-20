@@ -137,69 +137,81 @@ test("an old saved chat or voice limit is ignored", async () => {
   }
 });
 
-test("guidance is Pro-only for free by default, and counted per feature once allowed", async () => {
-  const blocked = await startApp();
-  const allowed = await startApp({ storedConfig: withLimits({ guidance: { goalGuidance: 1, taskGuidance: 0, recipeSkillGuide: 1, guidanceQuestions: 2 } }) });
+test("guidance is unlimited on every plan, and an old saved guidance limit is ignored", async () => {
+  const free = await startApp({ storedConfig: withLimits({ guidance: { goalGuidance: 0, taskGuidance: 0, recipeSkillGuide: 0, guidanceQuestions: 0 } }) });
+  const pro = await startApp({ user: PRO_USER, storedConfig: withLimits({}, { guidance: { goalGuidance: 1, taskGuidance: 1, recipeSkillGuide: 1, guidanceQuestions: 1 } }) });
   try {
-    const refused = await blocked.post("/ai/goal-guidance");
-    assert.equal(refused.status, 403);
-    assert.equal((await refused.json()).code, "PRO_REQUIRED");
-
-    assert.equal((await allowed.post("/ai/goal-guidance")).status, 200);
-    const exhausted = await allowed.post("/ai/goal-guidance");
-    assert.equal(exhausted.status, 403);
-    assert.equal((await exhausted.json()).code, "GUIDANCE_LIMIT_REACHED");
-    assert.equal((await allowed.post("/ai/task-guidance")).status, 403, "each feature has its own limit");
-
-    assert.equal((await allowed.post("/ai/recipe/videos")).status, 200, "video search is allowed while a guide is left");
-    assert.equal((await allowed.post("/ai/recipe/videos")).status, 200, "and is not counted");
-    assert.equal((await allowed.post("/ai/recipe/generate")).status, 200);
-    assert.equal((await allowed.post("/ai/skill/videos")).status, 403, "recipes and skills share one allowance");
-
-    assert.equal((await allowed.post("/ai/guidance/answer")).status, 200);
-    assert.equal((await allowed.post("/ai/recipe/answer")).status, 200);
-    assert.equal((await allowed.post("/ai/skill/answer")).status, 403);
-
-    const usage = await allowed.store.get("free-user", getUsageDay("America/New_York"));
-    assert.equal(usage.guidanceGoal, 1);
-    assert.equal(usage.guidanceRecipeSkill, 1);
-    assert.equal(usage.guidanceQuestions, 2);
-    assert.equal(usage.aiActions, 0, "guidance does not use the chat allowance");
-  } finally {
-    blocked.server.close();
-    allowed.server.close();
-  }
-});
-
-test("Pro guidance is unlimited by default and can be capped", async () => {
-  const unlimited = await startApp({ user: PRO_USER });
-  const capped = await startApp({ user: PRO_USER, storedConfig: withLimits({}, { guidance: { goalGuidance: 1, taskGuidance: null, recipeSkillGuide: null, guidanceQuestions: null } }) });
-  try {
-    for (let index = 0; index < 5; index += 1) {
-      assert.equal((await unlimited.post("/ai/goal-guidance")).status, 200);
+    for (const app of [free, pro]) {
+      for (let index = 0; index < 3; index += 1) {
+        assert.equal((await app.post("/ai/goal-guidance", {}, { goalTitle: "Learn piano" })).status, 200);
+        assert.equal((await app.post("/ai/task-guidance", {}, { title: "Fix the sink" })).status, 200);
+        assert.equal((await app.post("/ai/recipe/generate")).status, 200);
+        assert.equal((await app.post("/ai/skill/videos")).status, 200);
+        assert.equal((await app.post("/ai/guidance/answer")).status, 200);
+      }
     }
-    assert.equal((await capped.post("/ai/goal-guidance")).status, 200);
-    assert.equal((await capped.post("/ai/goal-guidance")).status, 403);
-    assert.equal((await capped.post("/ai/task-guidance")).status, 200);
+    const usage = await free.store.get("free-user", getUsageDay("America/New_York"));
+    assert.equal(usage.aiActions, 0, "guidance does not use the chat allowance");
+    assert.equal(usage.aiItemActions, 0, "guidance is not an AI action");
   } finally {
-    unlimited.server.close();
-    capped.server.close();
+    free.server.close();
+    pro.server.close();
   }
 });
 
-test("free users get guidance on the tutorial's demo task and goal only", async () => {
+test("free users get 8 AI actions a day: a big request gets what is left, failures are given back", async () => {
+  const { server, post } = await startApp();
+  try {
+    const reserve = async (count: number) => (await post("/usage/ai-actions/reserve", {}, { count })).json();
+    assert.deepEqual(await reserve(5), { granted: 5, used: 5, limit: 8, remaining: 3 });
+    assert.deepEqual(await reserve(5), { granted: 3, used: 8, limit: 8, remaining: 0 }, "only what is left");
+    assert.deepEqual(await reserve(1), { granted: 0, used: 8, limit: 8, remaining: 0 });
+
+    const released = await (await post("/usage/ai-actions/release", {}, { count: 2 })).json();
+    assert.deepEqual(released, { granted: 0, used: 6, limit: 8, remaining: 2 });
+    await post("/usage/ai-actions/release", {}, { count: 50 });
+    assert.equal((await reserve(1)).used, 1, "release never goes below zero");
+
+    assert.equal((await post("/usage/ai-actions/reserve", {}, { count: 0 })).status, 400);
+  } finally {
+    server.close();
+  }
+});
+
+test("AI actions are counted per day in the user's time zone", async () => {
   const { server, post, store } = await startApp();
   try {
-    assert.equal((await post("/ai/task-guidance", {}, { title: "Pack for a weekend trip" })).status, 200);
-    assert.equal((await post("/ai/goal-guidance", {}, { goalTitle: "Learn basic guitar" })).status, 200);
-    assert.equal((await post("/ai/skill/videos", {}, { title: " learn BASIC guitar " })).status, 200);
+    await post("/usage/ai-actions/reserve", {}, { count: 8 });
+    const tokyo = await (await post("/usage/ai-actions/reserve", { "x-eazee-timezone": "Asia/Tokyo" }, { count: 1 })).json();
+    const sameDay = getUsageDay("Asia/Tokyo") === getUsageDay("America/New_York");
+    assert.equal(tokyo.granted, sameDay ? 0 : 1);
+    assert.equal((await store.get("free-user", getUsageDay("America/New_York"))).aiItemActions, 8);
+  } finally {
+    server.close();
+  }
+});
 
-    const other = await post("/ai/goal-guidance", {}, { goalTitle: "Learn piano" });
-    assert.equal(other.status, 403);
-    assert.equal((await other.json()).code, "PRO_REQUIRED");
+test("Pro AI actions are unlimited by default, the admin can set limits, and a disabled switch meters nothing", async () => {
+  const pro = await startApp({ user: PRO_USER });
+  const configured = await startApp({ storedConfig: withLimits({ aiActionsPerDay: 2 }) });
+  const disabled = await startApp({ enabled: false });
+  try {
+    assert.deepEqual(await (await pro.post("/usage/ai-actions/reserve", {}, { count: 100 })).json(), { granted: 100, used: 100, limit: null, remaining: null });
+    assert.equal((await (await configured.post("/usage/ai-actions/reserve", {}, { count: 5 })).json()).granted, 2);
+    assert.deepEqual(await (await disabled.post("/usage/ai-actions/reserve", {}, { count: 20 })).json(), { granted: 20, used: 0, limit: null, remaining: null });
+  } finally {
+    pro.server.close();
+    configured.server.close();
+    disabled.server.close();
+  }
+});
 
-    const usage = await store.get("free-user", getUsageDay("America/New_York"));
-    assert.equal(usage.guidanceGoal, 0, "demo guidance is not counted");
+test("AI actions need a signed-in user", async () => {
+  const { server, post, setUser } = await startApp();
+  try {
+    setUser(null);
+    assert.equal((await post("/usage/ai-actions/reserve", {}, { count: 1 })).status, 401);
+    assert.equal((await post("/usage/ai-actions/release", {}, { count: 1 })).status, 401);
   } finally {
     server.close();
   }
