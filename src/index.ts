@@ -2885,12 +2885,17 @@ app.post("/ai/route", async (req, res) => {
     const personalizationMessage = buildAiPersonalizationSystemMessage(aiPersonalization);
     const aboutMeContent = assistantMode === "compact" ? null : buildAboutMeSystemContent(aboutMe);
     const memoriesContent = assistantMode === "compact" || !memories ? null : buildMemoriesSystemContent(memories);
+    // The personality goes after the app's own system messages, right before the conversation,
+    // so the app's long instructions don't drown out the tone the user picked (e.g. Roast Mode).
+    const leadingSystemCount = routeMessages.findIndex((message) => message.role !== "system");
+    const splitAt = leadingSystemCount === -1 ? routeMessages.length : leadingSystemCount;
     let workingMessages = [
       assistantMode === "compact" ? buildCompactServerSystemMessage(assistantSurface) : buildChatServerSystemMessage(),
-      ...(personalizationMessage ? [personalizationMessage] : []),
       ...(aboutMeContent ? [{ role: "system", content: aboutMeContent } as ChatMessage] : []),
       ...(memoriesContent ? [{ role: "system", content: memoriesContent } as ChatMessage] : []),
-      ...routeMessages,
+      ...routeMessages.slice(0, splitAt),
+      ...(personalizationMessage ? [personalizationMessage] : []),
+      ...routeMessages.slice(splitAt),
     ] as ChatMessage[];
     let retriedCalendarCreateContract = false;
     let reviewedCompactCalendarClarification = false;

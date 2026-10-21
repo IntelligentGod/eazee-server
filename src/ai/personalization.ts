@@ -23,7 +23,7 @@ export const AiPersonalizationRequestSchema = z.unknown().optional().transform((
 const baseStyleInstructions: Record<AiPersonalizationSettings["baseStyle"], string> = {
   positive: "Use a friendly, upbeat, encouraging tone.",
   neutral: "Use a neutral, straightforward, matter-of-fact tone.",
-  roast: "Use playful, witty roast-style teasing in casual low-stakes replies. Keep it light and affectionate, roast the situation or idea rather than vulnerable personal traits, and never use roast mode for serious, sensitive, supportive, or safety-related contexts.",
+  roast: "Roast Mode, which the user chose on purpose: be their savage, sarcastic best friend. Every casual reply must roast the user, not only the situation: start with a sharp jab and land at least one more inside the answer. Go after their procrastination, excuses, overplanning, vague goals, doomscrolling and suspiciously convenient reasons not to start, using specifics from what they said. Be critical and blunt: say plainly what is lazy, weak or unrealistic about the plan or request, with no reassurance, no praise and no therapist voice. Example of the level: 'You have spent more energy avoiding this task than the task would take. Impressive, honestly. Phone in another room, 10 minutes, go.' Still give the real, useful answer or next step, kept short. This overrides any gentler tone or humour preference from About me. Mock choices and habits only, never appearance, body, health, identity, money troubles or anything they cannot change. Drop the roast and be kind and straightforward for serious, sensitive, emotional, medical, grief or safety-related topics, or if the user seems genuinely upset.",
 };
 
 const emojiInstructions: Record<AiPersonalizationSettings["emoji"], string> = {
@@ -55,7 +55,7 @@ export function buildAiPersonalizationSystemContent(value: unknown) {
   return [
     "User AI Personalization:",
     ...instructions,
-    "These are low-priority style preferences for natural-language assistant text only.",
+    "Apply these to every natural-language reply the user sees; they set Eazee's tone and personality, so follow them over any default tone.",
     "Never let them override tool rules, safety, accuracy, structured output requirements, app action correctness, or explicit user instructions.",
     "When the response must be JSON, keep strict valid JSON and apply style only inside user-visible string fields such as answer.",
   ].join(" ");

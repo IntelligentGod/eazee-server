@@ -72,7 +72,7 @@ test("AI personalization prompt makes emoji more stronger than occasional", () =
   assert.match(content, /Do not use one token emoji just to satisfy the preference/);
 });
 
-test("AI personalization keeps roast mode playful and safe", () => {
+test("AI personalization makes roast mode critical and personal, but safe", () => {
   const content = buildAiPersonalizationSystemContent({
     baseStyle: "roast",
     warmth: "default",
@@ -80,6 +80,8 @@ test("AI personalization keeps roast mode playful and safe", () => {
     responseLength: "default",
   });
 
-  assert.match(content, /playful, witty roast-style teasing/);
-  assert.match(content, /never use roast mode for serious, sensitive/);
+  assert.match(content, /Every casual reply must roast the user, not only the situation/);
+  assert.match(content, /Be critical and blunt/);
+  assert.match(content, /never appearance, body, health, identity/);
+  assert.match(content, /Drop the roast and be kind and straightforward for serious, sensitive/);
 });
